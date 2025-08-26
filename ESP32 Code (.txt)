@@ -16,7 +16,7 @@
 #include "driver/gpio.h"
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "0.8.9"
+#define FIRMWARE_VERSION "0.9.0"
 #define BOARD_NAME "esp32 PCB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -52,6 +52,7 @@
 #define TORQUE_BELOW_MS           700
 #define MIN_RSSI_THRESHOLD        -90
 #define FILAMENT_LOSS_CONFIRM_MS  200
+#define STEP_DUTY_ON              512
 
 #define FAN_CHANNEL               LEDC_CHANNEL_1
 #define FAN_TIMER                 LEDC_TIMER_1
@@ -76,6 +77,11 @@ String wifiPassword = "";
 int fanSpeed = 80;                              // 0–100
 bool fanAlwaysOn = false;                       // true, false
 unsigned long fanStopAfter = 0;
+
+// --------------- High-Speed mode state -----------------
+bool highSpeedMode = false;
+int savedTorqueLimitHS = 0;
+unsigned long baseTargetStepIntervalMicros = DEFAULT_INTERVAL_US;
 
 // -------------------- Status variables & objects ------------------
 HardwareSerial TMCSerial(1);
@@ -125,6 +131,7 @@ Adafruit_NeoPixel led(1, LED_PIN, NEO_GRB + NEO_KHZ800);
 int ledPulseValue = 0;
 int ledPulseDirection = 1;
 unsigned long lastLedPulseTime = 0;
+uint16_t greenDitherAcc = 0;
 
 // ------- OTA LED pulse task handle and function ------------
 TaskHandle_t otaLedPulseTaskHandle = nullptr;
@@ -215,7 +222,7 @@ inline void stepperSetFreq(uint32_t freqHz) {
 }
 inline void stepperStart(uint32_t freqHz) {
     stepperSetFreq(freqHz);
-    ledc_set_duty(LEDC_HIGH_SPEED_MODE, STEP_LEDC_CHANNEL, 1);
+    ledc_set_duty(LEDC_HIGH_SPEED_MODE, STEP_LEDC_CHANNEL, STEP_DUTY_ON);
     ledc_update_duty(LEDC_HIGH_SPEED_MODE, STEP_LEDC_CHANNEL);
 }
 inline void stepperStop() {
@@ -226,10 +233,21 @@ int getSpeedPercentFromInterval(unsigned long intervalMicros) {
     float percent = 100.0 - ((intervalMicros - 110.0) * 50.0 / (200.0 - 110.0));
     return constrain(round(percent), 50, 100);
 }
+
+void applySpeedTarget() {
+    if (highSpeedMode) {
+        unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
+        if (adjusted < 50) adjusted = 50;
+        targetStepIntervalMicros = adjusted;
+    } else {
+        targetStepIntervalMicros = baseTargetStepIntervalMicros;
+    }
+}
 void loadSettings() {
     prefs.begin("respooler", true);
-    targetStepIntervalMicros = prefs.getUInt("speed", DEFAULT_INTERVAL_US);
-    speedPercent = getSpeedPercentFromInterval(targetStepIntervalMicros);
+    baseTargetStepIntervalMicros = prefs.getUInt("speed", DEFAULT_INTERVAL_US);
+    speedPercent = getSpeedPercentFromInterval(baseTargetStepIntervalMicros);
+    applySpeedTarget();
     motorDirection = prefs.getUInt("dir", 0);
     ledBrightness = prefs.getUInt("led", 50);
     useFilamentSensor = prefs.getBool("filamentSensor", true);
@@ -281,9 +299,9 @@ void sendStatus(bool forceSend = false) {
     stat["LED"] = ledBrightness;
     stat["DIR"] = motorDirection;
     stat["POW"] = motorStrength;
-    stat["TRQ"] = torqueLimit;
+    stat["TRQ"] = highSpeedMode ? 0 : torqueLimit;
     stat["DUR"] = calibrationAt80Speed / 1000;
-    stat["HS"]  = false;
+    stat["HS"]  = highSpeedMode;
     stat["FAN_SPD"] = fanSpeed;
     stat["FAN_ON"] = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter);
     stat["FAN_ALW"] = fanAlwaysOn;
@@ -322,7 +340,7 @@ void playStepperJingle() {
     if (jingleStyle == 0) return;
     delay(500);
     stepperStop();
-    ledc_stop(LEDC_HIGH_SPEED_MODE, STEP_LEDC_CHANNEL, 0 /* idle level */);
+    ledc_stop(LEDC_HIGH_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
     gpio_reset_pin((gpio_num_t)STEP_PIN);
     gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
     digitalWrite(EN_PIN, LOW);
@@ -469,7 +487,12 @@ void handleCommand(const std::string& cmd) {
 
     if (doc.containsKey("CMD")) {
         String command = doc["CMD"].as<String>();
-        if (command == "START") shouldStartMotorNow = true;
+        if (command == "START") {
+            if (!isMotorRunning) {
+                shouldStartMotorNow = true;
+                delayStartUntil = millis();
+            }
+        }
         else if (command == "STOP") {
             isMotorRunning = false;
             progress = 0.0;
@@ -545,10 +568,19 @@ void handleCommand(const std::string& cmd) {
             changed = true;
         }
         if (set.containsKey("TRQ")) {
-            torqueLimit = constrain((int)set["TRQ"], 0, 3);
-            prefs.begin("respooler", false);
-            prefs.putUInt("torqueLimit", torqueLimit);
-            prefs.end();
+            int newTrq = constrain((int)set["TRQ"], 0, 3);
+            if (highSpeedMode) {
+                savedTorqueLimitHS = newTrq;
+                prefs.begin("respooler", false);
+                prefs.putUInt("torqueLimit", savedTorqueLimitHS);
+                prefs.end();
+                torqueLimit = 0;
+            } else {
+                torqueLimit = newTrq;
+                prefs.begin("respooler", false);
+                prefs.putUInt("torqueLimit", torqueLimit);
+                prefs.end();
+            }
             changed = true;
         }
         if (set.containsKey("JIN")) {
@@ -573,13 +605,30 @@ void handleCommand(const std::string& cmd) {
             }
         }
         if (set.containsKey("SPD")) {
-          int speed = constrain((int)set["SPD"], 50, 100);
-          targetStepIntervalMicros = map(speed, 50, 100, 200, 110);
-          speedPercent = speed;
-          prefs.begin("respooler", false);
-          prefs.putUInt("speed", targetStepIntervalMicros);
-          prefs.end();
-          changed = true;
+            int speed = constrain((int)set["SPD"], 50, 100);
+            baseTargetStepIntervalMicros = map(speed, 50, 100, 200, 110);
+            speedPercent = speed;
+            prefs.begin("respooler", false);
+            prefs.putUInt("speed", baseTargetStepIntervalMicros);
+            prefs.end();
+            applySpeedTarget();
+            changed = true;
+        }
+        if (set.containsKey("HS")) {
+            bool newHS = (int)set["HS"] != 0;
+            if (newHS != highSpeedMode) {
+                if (newHS) {
+                    highSpeedMode = true;
+                    savedTorqueLimitHS = torqueLimit;
+                    torqueLimit = 0;
+                    applySpeedTarget();
+                } else {
+                    highSpeedMode = false;
+                    torqueLimit = savedTorqueLimitHS;
+                    applySpeedTarget();
+                }
+                changed = true;
+            }
         }
         if (set.containsKey("FAN_SPD")) {
             fanSpeed = constrain((int)set["FAN_SPD"], 0, 100);
@@ -595,8 +644,6 @@ void handleCommand(const std::string& cmd) {
             prefs.end();
             changed = true;
         }
-
-        // --- Add wifi ssid/pass set handling ---
         if (set.containsKey("WIFI_SSID")) {
             wifiSSID = set["WIFI_SSID"].as<String>();
             changed = true;
@@ -605,8 +652,6 @@ void handleCommand(const std::string& cmd) {
             wifiPassword = set["WIFI_PASS"].as<String>();
             changed = true;
         }
-
-        // --- Save wifi credentials if changed ---
         if (changed) {
             prefs.begin("respooler", false);
             prefs.putString("ssid", wifiSSID);
@@ -685,7 +730,6 @@ void setup() {
     };
     ledc_timer_config(&conn_led_timer);
 
-    // ---- Connection LED PWM setup ----
     ledc_channel_config_t conn_led_conf = {
       .gpio_num       = LED_CONN_PIN,
       .speed_mode     = LEDC_HIGH_SPEED_MODE,
@@ -699,7 +743,7 @@ void setup() {
 
     ledc_timer_config_t step_ledc_timer = {
         .speed_mode      = LEDC_HIGH_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_1_BIT,
+        .duty_resolution = LEDC_TIMER_10_BIT,
         .timer_num       = STEP_LEDC_TIMER,
         .freq_hz         = 1000,
         .clk_cfg         = LEDC_AUTO_CLK
@@ -729,6 +773,7 @@ void setup() {
     driver.microsteps(MICROSTEPPING);
     driver.en_spreadCycle(false);
     driver.pwm_autoscale(true);
+    driver.pwm_autograd(true);
     driver.SGTHRS(40); 
     driver.semin(0);
     driver.TCOOLTHRS(0xFFFFF);
@@ -833,8 +878,16 @@ void loop() {
                     ledPulseValue = 0;
                     ledPulseDirection = 1;
                 }
-                int scaledPulse = ledPulseValue * pwmValue / 255;
-                led.setPixelColor(0, led.Color(0, scaledPulse, 0));
+                uint16_t scaled16 = (uint16_t)ledPulseValue * (uint16_t)pwmValue;
+                uint8_t baseVal = scaled16 / 255;
+                uint8_t remainder = scaled16 % 255;
+                greenDitherAcc = (uint16_t)(greenDitherAcc + remainder);
+                if (greenDitherAcc >= 255) {
+                    baseVal++;
+                    greenDitherAcc -= 255;
+                }
+
+                led.setPixelColor(0, led.Color(0, baseVal, 0));
                 led.show();
             }
         } else if (errorFlag) {
@@ -906,17 +959,28 @@ void loop() {
         }
     } else { torqueBelowStartTime = 0; }
 
-    // ------- Filament loss -> Motor off + jingle ------
+    // ----- Respooler done -> Motor off + jingle -----
     if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > FILAMENT_LOSS_CONFIRM_MS) {
         isMotorRunning = false;
         digitalWrite(STEP_PIN, LOW);
         stepperStop();
         delay(40);
         digitalWrite(EN_PIN, HIGH);
+
+        progress = 0.0;
+        totalEstimatedTime = 0;
+        spoolingStartTime = 0;
+        if (deviceConnected && pCharacteristic) {
+            StaticJsonDocument<64> doc;
+            doc["DONE"] = true;
+            String jsonOut;
+            serializeJson(doc, jsonOut);
+            pCharacteristic->setValue(jsonOut.c_str());
+            pCharacteristic->notify();
+        }
+        sendStatus(true);
         delay(400);
         playStepperJingle();
-        progress = 0.0; totalEstimatedTime = 0; spoolingStartTime = 0;
-        sendStatus(true);
     }
 
     // ------- Direction change after stop -----------
@@ -937,7 +1001,8 @@ void loop() {
             shouldStartMotorNow = false;
             return;
         }
-        if (!useFilamentSensor || filamentDetected) {
+        if (isMotorRunning) { shouldStartMotorNow = false; }
+        else if (!useFilamentSensor || filamentDetected) {
             errorFlag = false;
             errorMsg = "";
             stepperStop();
@@ -949,7 +1014,8 @@ void loop() {
             lastAccelUpdate = now;
             isMotorRunning = true;
             stepperStart(stepFreqFromIntervalUs(stepIntervalMicros));
-            int currSpeedPercent = getSpeedPercentFromInterval(targetStepIntervalMicros);
+            int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)targetStepIntervalMicros));
+            currSpeedPercent = constrain(currSpeedPercent, 50, 140);
             totalEstimatedTime = calibrationAt80Speed * (80.0 / currSpeedPercent);
             if (pausedElapsed > 0) {
                 spoolingStartTime = millis() - pausedElapsed; pausedElapsed = 0;
@@ -1003,7 +1069,8 @@ void loop() {
             lastIntervalMicros = stepIntervalMicros;
         }
         if (stepIntervalMicros == targetStepIntervalMicros) {
-            int currSpeedPercent = getSpeedPercentFromInterval(stepIntervalMicros);
+            int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
+            currSpeedPercent = constrain(currSpeedPercent, 50, 140);
             unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
             unsigned long elapsed = millis() - spoolingStartTime;
             if (totalEstimatedTime > 0) {
@@ -1062,9 +1129,9 @@ void loop() {
         fanStopAfter = 0;
     }
 
-    // ----------- Periodisches Status-Update: alle 300 ms -----------
+    // ----------- Periodisches Status-Update: alle 200 ms -----------
     static unsigned long lastStatusTime = 0;
-    if (millis() - lastStatusTime > 300) {
+    if (millis() - lastStatusTime > 200) {
         sendStatus();
         lastStatusTime = millis();
     }
