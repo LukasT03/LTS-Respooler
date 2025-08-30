@@ -5,6 +5,7 @@ These are the firmware files for all the board versions. The .bin files are used
 ### 0.9.1
 - fixed issue with High-Speed setting not being saved after restart
 - bug fixes for Control Board V3
+- test
 
 ### 0.9.0
 - first beta version
