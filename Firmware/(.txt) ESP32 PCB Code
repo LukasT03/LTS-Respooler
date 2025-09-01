@@ -253,7 +253,6 @@ void loadSettings() {
     useFilamentSensor = prefs.getBool("filamentSensor", true);
     motorStrength = prefs.getUInt("motorStrength", 100);
     torqueLimit = prefs.getUInt("torqueLimit", 0);
-    // Load and apply persisted High-Speed mode
     highSpeedMode = prefs.getBool("hsMode", false);
     if (highSpeedMode) {
         savedTorqueLimitHS = torqueLimit;
