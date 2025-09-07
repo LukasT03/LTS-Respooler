@@ -286,10 +286,16 @@ void sendStatus(bool forceSend = false) {
 
     float progVal = progress;
     int remVal = 0;
-    if (isMotorRunning && totalEstimatedTime > 0) {
+    if (totalEstimatedTime > 0) {
         unsigned long elapsed = millis() - spoolingStartTime;
-        progVal = min(100.0f, 100.0f * elapsed / totalEstimatedTime);
-        remVal = (totalEstimatedTime - elapsed) / 1000;
+        if (elapsed >= totalEstimatedTime) {
+            progVal = 100.0f;
+            remVal = 0;
+        } else {
+            progVal = (100.0f * (float)elapsed) / (float)totalEstimatedTime;
+            unsigned long remainingMs = totalEstimatedTime - elapsed;
+            remVal = (int)(remainingMs / 1000UL);
+        }
     }
     int chipTemp = (int)temperatureRead();
 
@@ -834,7 +840,7 @@ void setup() {
     pwmValue = calculatePWM(ledBrightness);
 
     NimBLEDevice::init(BOARD_NAME);
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+    NimBLEDevice::setPower(ESP_PWR_LVL_P6);
     NimBLEDevice::setMTU(512);
     NimBLEServer* pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
@@ -1174,9 +1180,9 @@ void loop() {
         fanStopAfter = 0;
     }
 
-    // ----------- Periodic Status-Update: every 200 ms -----------
+    // ----------- Periodic Status-Update: every 350 ms -----------
     static unsigned long lastStatusTime = 0;
-    if (millis() - lastStatusTime > 200) {
+    if (millis() - lastStatusTime > 350) {
         sendStatus();
         lastStatusTime = millis();
     }
