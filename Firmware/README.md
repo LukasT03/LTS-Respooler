@@ -1,6 +1,9 @@
 These are the firmware files for all the board versions. The .bin files are used for the web flasher and OTA updates.
 
 # Changelog:
+
+### 0.9.2
+- improved stability of Bluetooth connection
   
 ### 0.9.1
 - fixed bug where High-Speed setting would change after restart
