@@ -12,11 +12,14 @@
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "esp_coexist.h"
 #include <driver/ledc.h>
 #include "driver/gpio.h"
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "0.9.1"
+#define FIRMWARE_VERSION "0.9.2"
 #define BOARD_NAME "esp32 PCB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -710,6 +713,8 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
 
 // ------------------- Setup ---------------------------------------
 void setup() {
+    esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+    esp_coex_preference_set(ESP_COEX_PREFER_BT);
     pinMode(FILAMENT_PIN, INPUT_PULLUP);
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     pinMode(STEP_PIN, OUTPUT);
@@ -815,6 +820,7 @@ void setup() {
     pwmValue = calculatePWM(ledBrightness);
 
     NimBLEDevice::init(BOARD_NAME);
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
     NimBLEDevice::setMTU(512);
     NimBLEServer* pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
@@ -1148,7 +1154,7 @@ void loop() {
         fanStopAfter = 0;
     }
 
-    // ----------- Periodisches Status-Update: alle 200 ms -----------
+    // ----------- Periodic Status-Update: every 200 ms -----------
     static unsigned long lastStatusTime = 0;
     if (millis() - lastStatusTime > 200) {
         sendStatus();
