@@ -17,6 +17,7 @@
 #include "esp_coexist.h"
 #include <driver/ledc.h>
 #include "driver/gpio.h"
+#include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
 #define FIRMWARE_VERSION "0.9.2"
@@ -128,7 +129,8 @@ float lastProgress = 0.0;
 int lastSpeedPercent = 100;
 int lastChipTemperature = 0;
 int lastRemainingTime = 0;
-bool otaInProgress = false;
+volatile bool otaInProgress = false;
+SemaphoreHandle_t bleNotifyMutex = nullptr;
 
 Adafruit_NeoPixel led(1, LED_PIN, NEO_GRB + NEO_KHZ800);
 int ledPulseValue = 0;
@@ -182,8 +184,10 @@ void wifiScanTask(void* parameter) {
     if (deviceConnected && pCharacteristic) {
         String jsonOut;
         serializeJson(ssidDoc, jsonOut);
+        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
         pCharacteristic->setValue(jsonOut.c_str());
         pCharacteristic->notify();
+        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
     }
     WiFi.scanDelete();
     prefs.begin("respooler", true);
@@ -324,8 +328,10 @@ void sendStatus(bool forceSend = false) {
 
     String jsonOut;
     serializeJson(doc, jsonOut);
+    if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
     pCharacteristic->setValue(jsonOut.c_str());
     pCharacteristic->notify();
+    if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
 }
 
 // ------------------- Stepper jingle/tones --------------------------
@@ -441,8 +447,10 @@ void sendOTAUpdate() {
                         doc["OTA_OK"] = true;
                         String jsonOut;
                         serializeJson(doc, jsonOut);
+                        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
                         pCharacteristic->setValue(jsonOut.c_str());
                         pCharacteristic->notify();
+                        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
                         NimBLEDevice::deinit(true);
                         delay(200);
                     }
@@ -456,8 +464,10 @@ void sendOTAUpdate() {
                     doc["OTA_OK"] = false;
                     String jsonOut;
                     serializeJson(doc, jsonOut);
+                    if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
                     pCharacteristic->setValue(jsonOut.c_str());
                     pCharacteristic->notify();
+                    if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
                 }
                 otaInProgress = false;
                 otaLedPulseTaskHandle = nullptr;
@@ -469,8 +479,10 @@ void sendOTAUpdate() {
                 doc["OTA_OK"] = false;
                 String jsonOut;
                 serializeJson(doc, jsonOut);
+                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
                 pCharacteristic->setValue(jsonOut.c_str());
                 pCharacteristic->notify();
+                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
             }
             otaInProgress = false;
             otaLedPulseTaskHandle = nullptr;
@@ -483,8 +495,10 @@ void sendOTAUpdate() {
                 doc["OTA_OK"] = false;
                 String jsonOut;
                 serializeJson(doc, jsonOut);
+                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
                 pCharacteristic->setValue(jsonOut.c_str());
                 pCharacteristic->notify();
+                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
             }
         }
         otaInProgress = false;
@@ -814,7 +828,7 @@ void setup() {
     if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
         WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
     }
-
+    bleNotifyMutex = xSemaphoreCreateMutex();
     loadSettings();
     setMotorCurrent(motorStrength);
     pwmValue = calculatePWM(ledBrightness);
@@ -856,8 +870,10 @@ void loop() {
                 doc["WIFI_CONN_RESULT"] = true;
                 String jsonOut;
                 serializeJson(doc, jsonOut);
+                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
                 pCharacteristic->setValue(jsonOut.c_str());
                 pCharacteristic->notify();
+                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
             }
             prefs.begin("respooler", false);
             prefs.putString("ssid", wifiSSID);
@@ -870,8 +886,10 @@ void loop() {
                 doc["WIFI_CONN_RESULT"] = false;
                 String jsonOut;
                 serializeJson(doc, jsonOut);
+                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
                 pCharacteristic->setValue(jsonOut.c_str());
                 pCharacteristic->notify();
+                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
             }
         }
     }
@@ -1000,8 +1018,10 @@ void loop() {
             doc["DONE"] = true;
             String jsonOut;
             serializeJson(doc, jsonOut);
+            if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
             pCharacteristic->setValue(jsonOut.c_str());
             pCharacteristic->notify();
+            if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
         }
         sendStatus(true);
         delay(400);
