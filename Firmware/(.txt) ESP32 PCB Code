@@ -55,7 +55,7 @@
 #define TORQUE_SG_LIMIT_HIGH      0.97
 #define TORQUE_BELOW_MS           700
 #define MIN_RSSI_THRESHOLD        -90
-#define FILAMENT_LOSS_CONFIRM_MS  200
+#define FILAMENT_LOSS_CONFIRM_MS  100
 #define STEP_DUTY_ON              512
 
 #define FAN_CHANNEL               LEDC_CHANNEL_1
