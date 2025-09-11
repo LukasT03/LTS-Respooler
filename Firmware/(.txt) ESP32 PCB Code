@@ -20,7 +20,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "0.9.2"
+#define FIRMWARE_VERSION "0.9.3"
 #define BOARD_NAME "esp32 PCB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -75,7 +75,7 @@ bool useFilamentSensor = true;                  // true, false
 int motorStrength = 100;                        // 80-120
 int torqueLimit = 0;                            // 0-3
 int jingleStyle = 0;                            // 0-3
-unsigned long calibrationAt80Speed = 930000;    // ms
+unsigned long calibrationAt80Speed = 895000;    // ms
 String wifiSSID = "";
 String wifiPassword = "";
 int fanSpeed = 80;                              // 0–100
@@ -121,8 +121,6 @@ unsigned long lastIntervalMicros = 0;
 unsigned long totalEstimatedTime = 0;
 unsigned long pausedElapsed = 0;
 float progress = 0.0;
-
-// ---- Status change detection fields ----
 bool lastIsMotorRunning = false;
 bool lastFilamentDetected = false;
 float lastProgress = 0.0;
@@ -138,7 +136,7 @@ int ledPulseDirection = 1;
 unsigned long lastLedPulseTime = 0;
 uint16_t greenDitherAcc = 0;
 
-// ------- OTA LED pulse task handle and function ------------
+// ---------- OTA LED pulse task handle and function ------------
 TaskHandle_t otaLedPulseTaskHandle = nullptr;
 TaskHandle_t wifiScanTaskHandle = nullptr;
 void otaLedPulseTask(void* parameter) {
@@ -266,7 +264,7 @@ void loadSettings() {
         torqueLimit = 0;
     }
     jingleStyle = prefs.getUInt("jingle", 0);
-    calibrationAt80Speed = prefs.getULong("cal80", 930000);
+    calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
     fanSpeed = prefs.getUInt("fanSpeed", 80);
     fanAlwaysOn = prefs.getBool("fanAlways", false);
     applySpeedTarget();
@@ -276,8 +274,8 @@ void loadSettings() {
     digitalWrite(DIR_PIN, motorDirection);
 }
 void setMotorCurrent(int percent) {
-    int strengthCurrent = map(percent, 80, 120, 400, 1000);
-    driver.rms_current(strengthCurrent + 150);
+    int strengthCurrent = map(percent, 80, 120, 900, 1600);
+    driver.rms_current(strengthCurrent);
 }
 
 // ------------------- BLE status/error/settings -------------------
@@ -366,6 +364,11 @@ void playStepperJingle() {
     gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
     digitalWrite(EN_PIN, LOW);
     digitalWrite(STEP_PIN, LOW);
+    {
+        int greenVal = pwmValue * 150 / 255;
+        led.setPixelColor(0, led.Color(0, greenVal, 0));
+        led.show();
+    }
     switch (jingleStyle) {
         case 1: // simple
             playTone(1000, 140); delay(20);
@@ -410,7 +413,7 @@ void playStepperJingle() {
     stepperStop();
 }
 
-// ------------------- BLE command handling -------------------------
+// --------------------- BLE command handling -------------------------
 void sendOTAUpdate() {
     if (otaInProgress) {
         return;
@@ -527,14 +530,47 @@ void handleCommand(const std::string& cmd) {
             }
         }
         else if (command == "STOP") {
-            isMotorRunning = false;
-            progress = 0.0;
-            totalEstimatedTime = 0;
-            spoolingStartTime = 0;
-            stepperStop();
-            digitalWrite(EN_PIN, HIGH);
-            digitalWrite(STEP_PIN, LOW);
-            sendStatus(true);
+            if (errorFlag) {
+                isMotorRunning = false;
+                shouldStartMotorNow = false;
+                pendingDirectionChange = false;
+                triggerJingleNow = 0;
+                errorFlag = false;
+                errorMsg = "";
+                progress = 0.0;
+                totalEstimatedTime = 0;
+                spoolingStartTime = 0;
+                pausedElapsed = 0;
+                filamentLostSince = 0;
+                stepperStop();
+                ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
+                gpio_reset_pin((gpio_num_t)STEP_PIN);
+                gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
+                digitalWrite(STEP_PIN, LOW);
+                digitalWrite(EN_PIN, HIGH);
+                {
+                    ledc_channel_config_t step_ledc_chan = {
+                        .gpio_num       = STEP_PIN,
+                        .speed_mode     = LEDC_LOW_SPEED_MODE,
+                        .channel        = STEP_LEDC_CHANNEL,
+                        .intr_type      = LEDC_INTR_DISABLE,
+                        .timer_sel      = STEP_LEDC_TIMER,
+                        .duty           = 0,
+                        .hpoint         = 0
+                    };
+                    ledc_channel_config(&step_ledc_chan);
+                }
+                sendStatus(true);
+            } else {
+                isMotorRunning = false;
+                progress = 0.0;
+                totalEstimatedTime = 0;
+                spoolingStartTime = 0;
+                stepperStop();
+                digitalWrite(EN_PIN, HIGH);
+                digitalWrite(STEP_PIN, LOW);
+                sendStatus(true);
+            }
         }
         else if (command == "WIFI_SCAN") {
           if (wifiScanTaskHandle == nullptr) {
@@ -634,14 +670,14 @@ void handleCommand(const std::string& cmd) {
             if (dur >= 10 && dur <= 20000) {
                 calibrationAt80Speed = dur * 1000UL;
                 prefs.begin("respooler", false);
-                prefs.putULong("cal80", calibrationAt80Speed);
+                prefs.putULong("cal80_093", calibrationAt80Speed);
                 prefs.end();
                 changed = true;
             }
         }
         if (set.containsKey("SPD")) {
             int speed = constrain((int)set["SPD"], 50, 100);
-            baseTargetStepIntervalMicros = map(speed, 50, 100, 200, 110);
+            baseTargetStepIntervalMicros = map(speed, 50, 100, 170, 93);
             speedPercent = speed;
             prefs.begin("respooler", false);
             prefs.putUInt("speed", baseTargetStepIntervalMicros);
@@ -731,7 +767,7 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
-// ------------------- Setup ---------------------------------------
+// -------------------------- Setup --------------------------------
 void setup() {
     esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     esp_coex_preference_set(ESP_COEX_PREFER_BT);
@@ -958,7 +994,7 @@ void loop() {
         }
     }
 
-    // ----------- StallGuard/torque auto-stop -----------
+    // ----------------- Torque Auto-Stop -----------------
     static unsigned long lastTorqueCheck = 0;
     static unsigned long torqueBelowStartTime = 0;
     if (torqueLimit > 0 && isMotorRunning && stepIntervalMicros == targetStepIntervalMicros) {
@@ -998,17 +1034,39 @@ void loop() {
                         pausedElapsed = elapsed;
                         torqueBelowStartTime = 0;
                         stepperStop();
-                        digitalWrite(EN_PIN, LOW); digitalWrite(STEP_PIN, LOW);
-                        delay(500);
+                        ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
+                        gpio_reset_pin((gpio_num_t)STEP_PIN);
+                        gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
+                        digitalWrite(EN_PIN, LOW);
+                        digitalWrite(STEP_PIN, LOW);
+                        delay(120);
+                        {
+                            int redVal = pwmValue * 150 / 255;
+                            led.setPixelColor(0, led.Color(redVal, 0, 0));
+                            led.show();
+                        }
                         for (int i = 0; i < 3; i++) { playTone(850, 250); delay(100); }
                         digitalWrite(EN_PIN, HIGH);
+                        {
+                            ledc_channel_config_t step_ledc_chan = {
+                                .gpio_num       = STEP_PIN,
+                                .speed_mode     = LEDC_LOW_SPEED_MODE,
+                                .channel        = STEP_LEDC_CHANNEL,
+                                .intr_type      = LEDC_INTR_DISABLE,
+                                .timer_sel      = STEP_LEDC_TIMER,
+                                .duty           = 0,
+                                .hpoint         = 0
+                            };
+                            ledc_channel_config(&step_ledc_chan);
+                        }
+                        stepperStop();
                     }
                 } else { torqueBelowStartTime = 0; }
             }
         }
     } else { torqueBelowStartTime = 0; }
 
-    // ----- Respooler done -> Motor off + jingle -----
+    // ------------------ Respooler done -------------------
     if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > FILAMENT_LOSS_CONFIRM_MS) {
         isMotorRunning = false;
         digitalWrite(STEP_PIN, LOW);
@@ -1061,6 +1119,17 @@ void loop() {
             digitalWrite(EN_PIN, LOW);
             digitalWrite(STEP_PIN, LOW);
             delay(15);
+            {
+                uint16_t prevI = driver.rms_current();
+                driver.en_spreadCycle(true);
+                int boosted = prevI + prevI / 4;
+                if (boosted > 1600) boosted = 1600;
+                driver.rms_current(boosted);
+                stepperStart(stepFreqFromIntervalUs(1800));
+                delay(250);
+                driver.rms_current(prevI);
+                driver.en_spreadCycle(false);
+            }
             stepIntervalMicros = START_INTERVAL_US;
             lastAccelUpdate = now;
             isMotorRunning = true;
@@ -1132,7 +1201,7 @@ void loop() {
         }
     }
 
-    // ------------- Connection/LED animation ------------------
+    // ------------- Connection LED animation ------------------
     if (!otaInProgress) {
         static int connLedPulse = 0;
         static int connLedDir = 2;
@@ -1157,13 +1226,13 @@ void loop() {
         }
     }
 
-    // -------------- Jingle trigger (on settings change) -------------
+    // ---------------------- Jingle trigger ---------------------
     if (triggerJingleNow != 0) {
         playStepperJingle();
         triggerJingleNow = 0;
     }
     
-    // ----------- BLE: restart advertising if disconnected --------------
+    // ----------- restart BLE advertising if disconnected --------------
     if (!deviceConnected && !NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::startAdvertising();
     }
@@ -1180,7 +1249,7 @@ void loop() {
         fanStopAfter = 0;
     }
 
-    // ----------- Periodic Status-Update: every 250 ms -----------
+    // ----------- Periodic Status-Update every 250 ms -----------
     static unsigned long lastStatusTime = 0;
     if (millis() - lastStatusTime > 250) {
         sendStatus();
