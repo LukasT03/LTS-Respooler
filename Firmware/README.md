@@ -2,6 +2,11 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 0.9.3
+- increased speed and motor strength
+- warning sound in case of Auto-Stop
+- improved accuracy of progress and remaining time
+
 ### 0.9.2
 - improved stability of Bluetooth connection
   
