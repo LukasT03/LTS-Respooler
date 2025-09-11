@@ -1249,9 +1249,9 @@ void loop() {
         fanStopAfter = 0;
     }
 
-    // ----------- Periodic Status-Update every 250 ms -----------
+    // ----------- Periodic Status-Update every 500 ms -----------
     static unsigned long lastStatusTime = 0;
-    if (millis() - lastStatusTime > 250) {
+    if (millis() - lastStatusTime > 500) {
         sendStatus();
         lastStatusTime = millis();
     }
