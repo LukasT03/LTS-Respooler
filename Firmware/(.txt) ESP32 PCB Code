@@ -278,6 +278,15 @@ void setMotorCurrent(int percent) {
     driver.rms_current(strengthCurrent);
 }
 
+void reSanitizeDriver() {
+    driver.GSTAT(0b111);
+    driver.en_spreadCycle(false);
+    driver.pwm_autoscale(true);
+    driver.pwm_autograd(true);
+    driver.microsteps(MICROSTEPPING);
+    setMotorCurrent(motorStrength);
+}
+
 // ------------------- BLE status/error/settings -------------------
 void sendStatus(bool forceSend = false) {
     if (!deviceConnected || !pCharacteristic) return;
@@ -1115,6 +1124,7 @@ void loop() {
             errorFlag = false;
             errorMsg = "";
             stepperStop();
+            reSanitizeDriver();
             digitalWrite(DIR_PIN, motorDirection);
             digitalWrite(EN_PIN, LOW);
             digitalWrite(STEP_PIN, LOW);
