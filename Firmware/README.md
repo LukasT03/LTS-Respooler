@@ -2,17 +2,22 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.0.0
+- Added option to pause the Respooler
+- Unified current state logic
+- Bug fixes
+
 ### 0.9.3
-- increased speed and motor strength
-- warning sound in case of Auto-Stop
-- fixed issue where motor strength would decrease after Auto-Stop
+- Increased speed and motor strength
+- Warning sound in case of Auto-Stop
+- Fixed issue where motor strength would decrease after Auto-Stop
 
 ### 0.9.2
-- improved stability of Bluetooth connection
+- Improved stability of Bluetooth connection
   
 ### 0.9.1
-- fixed bug where High-Speed setting would change after restart
-- bug fixes for Control Board V3
+- Fixed bug where High-Speed setting would change after restart
+- Bug fixes for Control Board V3
   
 ### 0.9.0
-- first beta version
+- First beta version
