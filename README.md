@@ -6,5 +6,4 @@ Feel free to message me if you have any feedback or ideas! :)
 
 ### Upcoming features:
 
-- "pause" option in addition to "stop" where the remaining time doesn't reset and the Live Activity stays present
 - automatically stopping the motor when the remaining time is up (for donor spools bigger than 1 kg)
