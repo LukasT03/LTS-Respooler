@@ -4,7 +4,7 @@ Here you can find all the files related to the LTS Respooler. Including the raw 
 
 Feel free to message me if you have any feedback or ideas! :)
 
-### ➡️ Upcoming features and files:
+## ➡️ Upcoming features and files:
 
 - Automatically stopping the motor when the remaining time is up (for donor spools bigger than 1 kg)
 - Official attachment for spools bigger than 1 kg
