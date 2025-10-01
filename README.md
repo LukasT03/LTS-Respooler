@@ -4,6 +4,9 @@ Here you can find all the files related to the LTS Respooler. Including the raw 
 
 Feel free to message me if you have any feedback or ideas! :)
 
-### Upcoming features:
+### 🔜 Upcoming features and files:
 
-- automatically stopping the motor when the remaining time is up (for donor spools bigger than 1 kg)
+- Automatically stopping the motor when the remaining time is up (for donor spools bigger than 1 kg)
+- Official attachment for spools bigger than 1 kg
+- Control Board V4 files
+- Respooler Pro beta 3D files (compatible with current PCBs)
