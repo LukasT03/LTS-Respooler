@@ -10,3 +10,9 @@ Feel free to message me if you have any feedback or ideas! :)
 - Official attachment for spools bigger than 1 kg
 - Control Board V4 files
 - Respooler Pro beta 3D files (compatible with current PCBs)
+
+## 🚀 Getting started
+
+- All the 3D files can be downloaded and printed from [MakerWorld](https://makerworld.com/models/448008)
+- Assembly Intructions and the Needed Hardware PDF can also be found there
+- Most of the Hardware can be ordered from Bambu Lab's Maker's Supply
