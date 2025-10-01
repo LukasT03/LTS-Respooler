@@ -16,3 +16,7 @@ Feel free to message me if you have any feedback or ideas! :)
 - All the 3D files can be downloaded and printed from [MakerWorld](https://makerworld.com/models/448008)
 - Assembly Intructions and the Needed Hardware PDF can also be found there
 - Most of the Hardware can be ordered from Bambu Lab's Maker's Supply
+
+## 📋 License
+
+This project is licensed under the MIT license, giving you the freedom to use it however you like. Contributions, modifications, and improvements are very welcome! :)
