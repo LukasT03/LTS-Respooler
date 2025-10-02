@@ -6,7 +6,6 @@ Feel free to message me if you have any feedback or ideas! :)
 
 ## ➡️ Upcoming features and files:
 
-- Automatically stopping the motor when the remaining time is up (for donor spools bigger than 1 kg)
 - Official attachment for spools bigger than 1 kg
 - Control Board V4 files
 - Respooler Pro beta 3D files (compatible with current PCBs)
