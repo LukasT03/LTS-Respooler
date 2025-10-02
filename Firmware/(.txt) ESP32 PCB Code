@@ -20,7 +20,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.0.0"
+#define FIRMWARE_VERSION "1.1.0"
 #define BOARD_NAME "esp32 PCB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -58,6 +58,9 @@
 #define FILAMENT_LOSS_CONFIRM_MS  100
 #define STEP_DUTY_ON              512
 
+#define TARGET_WEIGHT_FACTOR_2 0.59f
+#define TARGET_WEIGHT_FACTOR_3 0.34f
+
 #define FAN_CHANNEL               LEDC_CHANNEL_1
 #define FAN_TIMER                 LEDC_TIMER_1
 #define STEP_LEDC_CHANNEL         LEDC_CHANNEL_3
@@ -73,12 +76,13 @@ int motorDirection = 0;                         // 0, 1
 int ledBrightness = 50;                         // 0-100
 bool useFilamentSensor = true;                  // true, false
 int motorStrength = 100;                        // 80-120
+int targetWeight = 0;                           // 0-3
 int torqueLimit = 0;                            // 0-3
 int jingleStyle = 0;                            // 0-3
 unsigned long calibrationAt80Speed = 895000;    // ms
 String wifiSSID = "";                           // string
 String wifiPassword = "";                       // string
-int fanSpeed = 80;                              // 0–100
+int fanSpeed = 60;                              // 0–100
 bool fanAlwaysOn = false;                       // true, false
 unsigned long fanStopAfter = 0;
 
@@ -276,8 +280,9 @@ void loadSettings() {
     }
     jingleStyle = prefs.getUInt("jingle", 0);
     calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
-    fanSpeed = prefs.getUInt("fanSpeed", 80);
+    fanSpeed = prefs.getUInt("fanSpeed", 60);
     fanAlwaysOn = prefs.getBool("fanAlways", false);
+    targetWeight = prefs.getUInt("targetWeight", 0);
     applySpeedTarget();
     prefs.end();
     setMotorCurrent(motorStrength);
@@ -304,7 +309,10 @@ void sendStatus(bool forceSend = false) {
 
     float progVal = progress;
     int remVal = 0;
-    if (totalEstimatedTime > 0) {
+    if (currentState == 'D') {
+        progVal = 100.0f;
+        remVal = 0;
+    } else if (totalEstimatedTime > 0) {
         unsigned long elapsed;
         if (spoolingStartTime > 0) {
             elapsed = millis() - spoolingStartTime;
@@ -315,12 +323,19 @@ void sendStatus(bool forceSend = false) {
         } else {
             elapsed = 0;
         }
-        if (elapsed >= totalEstimatedTime) {
+        unsigned long effectiveTotal = totalEstimatedTime;
+        if (targetWeight == 2) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_2);
+        else if (targetWeight == 3) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_3);
+
+        if (effectiveTotal == 0) {
+            progVal = 0.0f;
+            remVal = 0;
+        } else if (elapsed >= effectiveTotal) {
             progVal = 100.0f;
             remVal = 0;
         } else {
-            progVal = (100.0f * (float)elapsed) / (float)totalEstimatedTime;
-            unsigned long remainingMs = totalEstimatedTime - elapsed;
+            progVal = (100.0f * (float)elapsed) / (float)effectiveTotal;
+            unsigned long remainingMs = effectiveTotal - elapsed;
             remVal = (int)(remainingMs / 1000UL);
         }
     }
@@ -365,6 +380,7 @@ void sendStatus(bool forceSend = false) {
     doc["DIR"] = motorDirection;
     doc["POW"] = motorStrength;
     doc["TRQ"] = highSpeedMode ? 0 : torqueLimit;
+    doc["WGT"] = targetWeight;
     doc["DUR"] = calibrationAt80Speed / 1000;
     doc["HS"]  = highSpeedMode;
     doc["FAN_SPD"] = fanSpeed;
@@ -761,6 +777,14 @@ void handleCommand(const std::string& cmd) {
                 prefs.end();
                 changed = true;
             }
+        }
+        if (set.containsKey("WGT")) {
+            int newWgt = constrain((int)set["WGT"], 0, 3);
+            targetWeight = newWgt;
+            prefs.begin("respooler", false);
+            prefs.putUInt("targetWeight", (unsigned int)targetWeight);
+            prefs.end();
+            changed = true;
         }
         if (set.containsKey("SPD")) {
             int speed = constrain((int)set["SPD"], 50, 100);
@@ -1194,6 +1218,46 @@ void loop() {
             }
         }
     } else { torqueBelowStartTime = 0; }
+
+    static unsigned long wgtFinishStart = 0;
+    if (isMotorRunning && targetWeight >= 1 && targetWeight <= 3 && totalEstimatedTime > 0) {
+        unsigned long elapsed = 0;
+        if (spoolingStartTime > 0) elapsed = now - spoolingStartTime;
+        else if (pausedElapsed > 0) elapsed = pausedElapsed;
+        else if (currentState == 'A') elapsed = pausedElapsed;
+
+        unsigned long effectiveTotal = totalEstimatedTime;
+        if (targetWeight == 2) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_2);
+        else if (targetWeight == 3) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_3);
+
+        if (effectiveTotal == 0) {
+            wgtFinishStart = 0;
+        } else if (elapsed >= effectiveTotal) {
+            if (!(useFilamentSensor && !filamentDetected)) {
+                if (wgtFinishStart == 0) wgtFinishStart = now;
+                if (now - wgtFinishStart >= 700) {
+                    isMotorRunning = false;
+                    digitalWrite(STEP_PIN, LOW);
+                    stepperStop();
+                    digitalWrite(EN_PIN, HIGH);
+                    totalEstimatedTime = 0;
+                    spoolingStartTime = 0;
+                    currentState = 'D';
+                    sendStatus(true);
+                    progress = 100.0f;
+                    sendStatus(true);
+                    doneHoldActive = true;
+                    doneHoldStart = millis();
+                    playStepperJingle();
+                    wgtFinishStart = 0;
+                }
+            } else {
+                wgtFinishStart = 0;
+            }
+        } else {
+            wgtFinishStart = 0;
+        }
+    }
 
     // ------------------ Respooler done -------------------
     if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > FILAMENT_LOSS_CONFIRM_MS) {
