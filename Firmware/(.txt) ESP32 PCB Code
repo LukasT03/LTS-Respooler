@@ -523,6 +523,7 @@ void sendOTAUpdate() {
                     if (deviceConnected && pCharacteristic) {
                         StaticJsonDocument<64> doc;
                         doc["OTA_OK"] = true;
+                        sendStatus(true);
                         String jsonOut;
                         serializeJson(doc, jsonOut);
                         if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
@@ -530,7 +531,7 @@ void sendOTAUpdate() {
                         pCharacteristic->notify();
                         if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
                         NimBLEDevice::deinit(true);
-                        delay(200);
+                        delay(1000);
                     }
                     otaInProgress = false;
                     otaLedPulseTaskHandle = nullptr;
