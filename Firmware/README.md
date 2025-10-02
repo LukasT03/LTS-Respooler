@@ -2,6 +2,10 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.1.0
+- Added option to choose what amount to transfer (needs App version 1.6.0 or above)
+- Lowered default fan speed
+
 ### 1.0.0
 - Added option to pause the Respooler
 - Unified current state logic
