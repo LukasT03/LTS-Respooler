@@ -7,7 +7,6 @@ Feel free to message me if you have any feedback or ideas! :)
 ## ➡️ Upcoming features and files:
 
 - Official attachment for spools bigger than 1 kg
-- Control Board V4 files
 - Respooler Pro beta 3D files (compatible with current PCBs)
 
 ## 🚀 Getting started
