@@ -2,6 +2,6 @@ Here you can find the source code and compiled file for the LTS Utility Program.
 
 The LTS Control App can be downloaded from the [App Store](https://apps.apple.com/app/lts-control/id6742149969). An Android version is in early development. For now, you can use the Web version at the bottom of [this](https://lts-design.com/pages/software) page.
 
-## 📱 The mobile apps have separate repos and are linked below
+## 📱 The mobile app has separate repos that are linked below
 - 🍏 iOS: https://github.com/LukasT03/LTS-Control-iOS
 - 🤖 Android: https://github.com/LukasT03/LTS-Control-Android
