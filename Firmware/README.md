@@ -2,6 +2,9 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.1.1
+- Increased LED Brightness
+
 ### 1.1.0
 - Added option to choose what amount to transfer
 - Lowered default fan speed
