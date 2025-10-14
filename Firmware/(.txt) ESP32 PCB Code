@@ -20,7 +20,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.1.0"
+#define FIRMWARE_VERSION "1.1.1"
 #define BOARD_NAME "esp32 PCB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -156,8 +156,6 @@ void otaLedPulseTask(void* parameter) {
     pwmValue = calculatePWM(ledBrightness);
     int otaLedPulse = 0;
     int otaLedDir = 1;
-    int maxBlue = (pwmValue * 150) / 255;
-
     while (otaInProgress) {
         otaLedPulse += otaLedDir * 8;
         if (otaLedPulse >= LED_CONN_PULSE_MAX || otaLedPulse <= 0) otaLedDir *= -1;
@@ -165,7 +163,7 @@ void otaLedPulseTask(void* parameter) {
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - otaLedPulse);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
 
-        int scaledOtaPulse = map(otaLedPulse, 0, LED_CONN_PULSE_MAX, 0, maxBlue);
+        int scaledOtaPulse = map(otaLedPulse, 0, LED_CONN_PULSE_MAX, 0, pwmValue);
         led.setPixelColor(0, led.Color(0, 0, scaledOtaPulse));
         led.show();
 
@@ -218,9 +216,9 @@ unsigned long wifiConnectStartTime = 0;
 
 // ------------------ Helper and utility functions ---------------
 int calculatePWM(int brightnessPercent) {
-    float gamma = 2.2;
-    float normalized = constrain(brightnessPercent, 0, 100) / 100.0;
-    return round(pow(normalized, gamma) * 255);
+    float gamma = 1.15f;
+    float n = (float)constrain(brightnessPercent, 0, 100) / 100.0f;
+    return (int)round(powf(n, gamma) * 255.0f);
 }
 int fanPWMFromSpeed(int percent) {
     return map(constrain(percent, 0, 100), 0, 100, 0, 255);
@@ -429,8 +427,7 @@ void playStepperJingle() {
     digitalWrite(EN_PIN, LOW);
     digitalWrite(STEP_PIN, LOW);
     {
-        int greenVal = pwmValue * 150 / 255;
-        led.setPixelColor(0, led.Color(0, greenVal, 0));
+        led.setPixelColor(0, led.Color(0, pwmValue, 0));
         led.show();
     }
     switch (jingleStyle) {
@@ -1134,17 +1131,14 @@ void loop() {
             if (millis() - lastLedToggle > 400) {
                 lastLedToggle = now;
                 ledState = !ledState;
-                int redVal = pwmValue * 150 / 255;
-                led.setPixelColor(0, ledState ? led.Color(redVal, 0, 0) : 0);
+                led.setPixelColor(0, ledState ? led.Color(pwmValue, 0, 0) : 0);
                 led.show();
             }
         } else if (useFilamentSensor && filamentDetected) {
-            int greenVal = pwmValue * 150 / 255;
-            led.setPixelColor(0, led.Color(0, greenVal, 0));
+            led.setPixelColor(0, led.Color(0, pwmValue, 0));
             led.show();
         } else {
-            int blueVal = pwmValue * 150 / 255;
-            led.setPixelColor(0, led.Color(0, 0, blueVal));
+            led.setPixelColor(0, led.Color(0, 0, pwmValue));
             led.show();
         }
     }
@@ -1195,8 +1189,7 @@ void loop() {
                         digitalWrite(STEP_PIN, LOW);
                         delay(120);
                         {
-                            int redVal = pwmValue * 150 / 255;
-                            led.setPixelColor(0, led.Color(redVal, 0, 0));
+                            led.setPixelColor(0, led.Color(pwmValue, 0, 0));
                             led.show();
                         }
                         for (int i = 0; i < 3; i++) { playTone(850, 250); delay(100); }
@@ -1356,8 +1349,7 @@ void loop() {
                 } else if (useFilamentSensor && !filamentDetected) {
                     if (!otaInProgress) {
                         for (int i = 0; i < 5; i++) {
-                            int blueVal = pwmValue * 150 / 255;
-                            led.setPixelColor(0, led.Color(0, 0, blueVal)); led.show(); delay(100);
+                            led.setPixelColor(0, led.Color(0, 0, pwmValue)); led.show(); delay(100);
                             led.setPixelColor(0, 0); led.show(); delay(100);
                         }
                     }
