@@ -40,7 +40,7 @@
 
 // -------------------- Timing and Limits --------------------------
 #define START_INTERVAL_US         700
-#define DEFAULT_INTERVAL_US       146
+#define DEFAULT_INTERVAL_US       116
 #define TORQUE_CHECK_INTERVAL_MS  50
 #define BUTTON_DEBOUNCE_MS        50
 #define ACCEL_UPDATE_INTERVAL     20
