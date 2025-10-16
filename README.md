@@ -4,6 +4,7 @@ The LTS Respooler is a compact and slightly over-engineered filament Respooler o
 
 ## ➡️ Upcoming features and files:
 
+- Smoother motor behavior when in High-Speed mode and speed > 90
 - Official attachment for spools bigger than 1 kg
 - Respooler Pro beta 3D files (compatible with current PCBs)
 
