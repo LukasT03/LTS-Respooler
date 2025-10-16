@@ -156,18 +156,26 @@ void otaLedPulseTask(void* parameter) {
     pwmValue = calculatePWM(ledBrightness);
     int otaLedPulse = 0;
     int otaLedDir = 1;
+    uint16_t blueDitherAcc = 0;
+
     while (otaInProgress) {
-        otaLedPulse += otaLedDir * 8;
-        if (otaLedPulse >= LED_CONN_PULSE_MAX || otaLedPulse <= 0) otaLedDir *= -1;
+        otaLedPulse += otaLedDir * 1;
+        if (otaLedPulse >= LED_CONN_PULSE_MAX) { otaLedPulse = LED_CONN_PULSE_MAX; otaLedDir = -1; }
+        else if (otaLedPulse <= 0) { otaLedPulse = 0; otaLedDir =  1; }
 
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - otaLedPulse);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
 
-        int scaledOtaPulse = map(otaLedPulse, 0, LED_CONN_PULSE_MAX, 0, pwmValue);
-        led.setPixelColor(0, led.Color(0, 0, scaledOtaPulse));
-        led.show();
+        uint16_t pulse255 = (uint16_t)((otaLedPulse * 255 + (LED_CONN_PULSE_MAX/2)) / LED_CONN_PULSE_MAX);
+        uint16_t scaled16 = (uint16_t)pulse255 * (uint16_t)pwmValue;
+        uint8_t baseVal = scaled16 / 255;
+        uint8_t remainder = scaled16 % 255;
+        blueDitherAcc = (uint16_t)(blueDitherAcc + remainder);
+        if (blueDitherAcc >= 255) { baseVal++; blueDitherAcc -= 255; }
 
-        vTaskDelay(20 / portTICK_PERIOD_MS);
+        led.setPixelColor(0, led.Color(0, 0, baseVal));
+        led.show();
+        vTaskDelay(5 / portTICK_PERIOD_MS);
     }
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
@@ -520,6 +528,7 @@ void sendOTAUpdate() {
                     if (deviceConnected && pCharacteristic) {
                         StaticJsonDocument<64> doc;
                         doc["OTA_OK"] = true;
+                        delay(100);
                         sendStatus(true);
                         String jsonOut;
                         serializeJson(doc, jsonOut);
