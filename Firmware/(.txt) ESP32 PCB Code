@@ -41,7 +41,7 @@
 
 // -------------------- Timing and Limits --------------------------
 #define START_INTERVAL_US         700
-#define DEFAULT_INTERVAL_US       146
+#define DEFAULT_INTERVAL_US       116
 #define TORQUE_CHECK_INTERVAL_MS  50
 #define BUTTON_DEBOUNCE_MS        50
 #define ACCEL_UPDATE_INTERVAL     20
@@ -71,7 +71,7 @@
 #define CHARACTERISTIC_UUID       "7CB2F1B4-7E3F-43D2-8C92-DF58C9A7B1A8"
 
 // ------------------- Direct settings variables -------------------
-int speedPercent = 100;                         // 50-100
+int speedPercent = 85;                          // 50-100
 int motorDirection = 0;                         // 0, 1
 int ledBrightness = 50;                         // 0-100
 bool useFilamentSensor = true;                  // true, false
