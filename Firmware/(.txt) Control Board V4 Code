@@ -293,7 +293,7 @@ void loadSettings() {
     digitalWrite(DIR_PIN, motorDirection);
 }
 void setMotorCurrent(int percent) {
-    int strengthCurrent = map(percent, 80, 120, 400, 1000);
+    int strengthCurrent = map(percent, 80, 120, 700, 1400);
     driver.rms_current(strengthCurrent);
 }
 
