@@ -159,8 +159,7 @@ void otaLedPulseTask(void* parameter) {
         otaLedPulse += otaLedDir * 8;
         if (otaLedPulse >= LED_CONN_PULSE_MAX || otaLedPulse <= 0) otaLedDir *= -1;
 
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - otaLedPulse);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+        setConnLed(otaLedPulse);
 
         int scaledOtaPulse = map(otaLedPulse, 0, LED_CONN_PULSE_MAX, 0, pwmValue);
         led.setPixelColor(0, led.Color(0, 0, scaledOtaPulse));
@@ -168,8 +167,7 @@ void otaLedPulseTask(void* parameter) {
 
         vTaskDelay(20 / portTICK_PERIOD_MS);
     }
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+    setConnLed(LED_CONN_PULSE_MAX);
     led.setPixelColor(0, 0);
     led.show();
     vTaskDelete(NULL);
