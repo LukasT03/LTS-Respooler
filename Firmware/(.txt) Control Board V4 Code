@@ -19,7 +19,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.1.1"
+#define FIRMWARE_VERSION "1.1.2"
 #define BOARD_NAME "CtrBoard V4"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -792,7 +792,9 @@ void handleCommand(const std::string& cmd) {
         }
         if (set.containsKey("SPD")) {
             int speed = constrain((int)set["SPD"], 50, 100);
-            baseTargetStepIntervalMicros = map(speed, 50, 100, 170, 93);
+            double span = 170.0 - 93.0;
+            double baseInterval = 170.0 - ((double)(speed - 50) * span / 50.0);
+            baseTargetStepIntervalMicros = (unsigned long)lround(baseInterval);
             speedPercent = speed;
             prefs.begin("respooler", false);
             prefs.putUInt("speed", baseTargetStepIntervalMicros);
