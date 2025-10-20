@@ -215,7 +215,7 @@ void wifiScanTask(void* parameter) {
     vTaskDelete(NULL);
 }
 
-// -------------- WLAN connect async status --------------
+// -------------- Wi-Fi connect async status --------------
 bool wifiConnectInProgress = false;
 unsigned long wifiConnectStartTime = 0;
 
@@ -1021,7 +1021,7 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
-    // ------------------ WLAN connect async check -----------------
+    // ------------------ Wi-Fi connect async check -----------------
     if (wifiConnectInProgress) {
         if (WiFi.status() == WL_CONNECTED) {
             wifiConnectInProgress = false;
@@ -1331,7 +1331,7 @@ void loop() {
                 if (boosted > 1600) boosted = 1600;
                 driver.rms_current(boosted);
                 stepperStart(stepFreqFromIntervalUs(1800));
-                delay(250);
+                delay(150);
                 driver.rms_current(prevI);
                 driver.en_spreadCycle(false);
             }
@@ -1468,7 +1468,7 @@ void loop() {
         triggerJingleNow = 0;
     }
     
-    // ----------- restart BLE advertising if disconnected --------------
+    // ----------- Restart BLE advertising if disconnected --------------
     if (!deviceConnected && !NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::startAdvertising();
     }
