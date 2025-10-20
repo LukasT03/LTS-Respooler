@@ -2,6 +2,9 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.1.2
+- Fixed issue where the speed value would slightly decrease after restart
+
 ### 1.1.1
 - Added support for Control Board V4
 - Increased LED brightness
