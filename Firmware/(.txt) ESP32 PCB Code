@@ -1071,7 +1071,7 @@ void loop() {
         }
     }
 
-    if (useFilamentSensor && currentState == 'P' && !filamentDetected) {
+    if (useFilamentSensor && (currentState == 'P' || currentState == 'A') && !filamentDetected) {
         isMotorRunning = false;
         shouldStartMotorNow = false;
         pendingDirectionChange = false;
@@ -1353,7 +1353,7 @@ void loop() {
 
         if (reading == LOW) {
             if (!isMotorRunning) {
-                if (currentState == 'P') {
+                if (currentState == 'P' || currentState == 'A') {
                     buttonPressSince = now;
                     buttonLongPressHandled = false;
                     buttonAwaitingDecision = true;
