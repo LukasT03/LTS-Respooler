@@ -4,7 +4,7 @@ These are the firmware files for all the board versions. The .bin files are used
 
 ### 1.1.2
 - Added ability to reset Auto-Stop via long button press
-- Bug fixes
+- Fixed issue where speed would decrease after restart
 
 ### 1.1.1
 - Added support for Control Board V4
