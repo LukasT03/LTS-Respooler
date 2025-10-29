@@ -12,7 +12,7 @@ The LTS Respooler is a compact and slightly over-engineered filament Respooler o
 - All the 3D files can be downloaded and printed from [MakerWorld](https://makerworld.com/models/448008)
 - Assembly Intructions and the Needed Hardware PDF can also be found there
 - Most of the Hardware can be ordered from Bambu Lab's Maker's Supply
-- Flash the newest firmware version to your ESP32 or Control Board using the [Web Flasher](https://lts-design.com/pages/software)
+- Flash the newest firmware version to your ESP32 or LTS Control Board using the [Web Flasher](https://lts-design.com/pages/software)
 
 ## 📋 License
 
