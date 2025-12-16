@@ -1,4 +1,4 @@
-// -------------- LTS RESPOOLER Control Board V4 CODE ---------------
+// ----------------- LTS RESPOOLER CONTROL BOARD CODE -----------------
 
 #include <TMCStepper.h>
 #include <NimBLEDevice.h>
@@ -19,84 +19,113 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.1.2"
-#define BOARD_NAME "CtrBoard V4"
+#define FIRMWARE_VERSION "1.2.0"
+#define BOARD_NAME "LTS CB"
 
 // --------------------- Hardware Pin Defines ---------------------
-#define TMC_UART_RX      18
-#define TMC_UART_TX      17
-#define STEP_PIN         14
-#define DIR_PIN          21
-#define EN_PIN           40
-#define LED_PIN          9
-#define LED_CONN_PIN     47
-#define FILAMENT_PIN     11
-#define BUTTON_PIN       10
-#define FAN_PIN          13
+#define TMC_UART_RX 18
+#define TMC_UART_TX 17
+#define STEP_PIN 14
+#define DIR_PIN 21
+#define EN_PIN 40
+#define LED_PIN 9
+#define LED_CONN_PIN 47
+#define FILAMENT_PIN 11
+#define BUTTON_PIN 10
+#define FAN_PIN 13
+#define SERVO_PIN 12
 
 // ------------------------ Motor Parameters ----------------------
-#define MICROSTEPPING      8
-#define R_SENSE            0.11f
+#define MICROSTEPPING 8
+#define R_SENSE 0.11f
 
 // -------------------- Timing and Limits --------------------------
-#define START_INTERVAL_US         700
-#define DEFAULT_INTERVAL_US       116
-#define TORQUE_CHECK_INTERVAL_MS  50
-#define BUTTON_DEBOUNCE_MS        50
-#define ACCEL_UPDATE_INTERVAL     20
-#define ACCEL_STEP                5
-#define LED_CONN_PULSE_MAX        60
-#define STATUS_NOTIFY_INTERVAL    400
-#define LED_BLINK_INTERVAL        1000
-#define TORQUE_SG_IGNORE          20
-#define TORQUE_SG_LIMIT_LOW       0.72
-#define TORQUE_SG_LIMIT_MED       0.85
-#define TORQUE_SG_LIMIT_HIGH      0.97
-#define TORQUE_BELOW_MS           700
-#define MIN_RSSI_THRESHOLD        -90
-#define FILAMENT_LOSS_CONFIRM_MS  100
-#define STEP_DUTY_ON              512
+#define START_INTERVAL_US 700
+#define DEFAULT_INTERVAL_US 116
+#define TORQUE_CHECK_INTERVAL_MS 50
+#define BUTTON_DEBOUNCE_MS 50
+#define ACCEL_UPDATE_INTERVAL 20
+#define ACCEL_STEP 5
+#define LED_CONN_PULSE_MAX 60
+#define STATUS_NOTIFY_INTERVAL 400
+#define LED_BLINK_INTERVAL 1000
+#define TORQUE_SG_IGNORE 20
+#define TORQUE_SG_LIMIT_LOW 0.72
+#define TORQUE_SG_LIMIT_MED 0.85
+#define TORQUE_SG_LIMIT_HIGH 0.97
+#define TORQUE_BELOW_MS 700
+#define MIN_RSSI_THRESHOLD -90
+#define FILAMENT_LOSS_CONFIRM_MS 100
+#define STEP_DUTY_ON 512
 
 #define TARGET_WEIGHT_FACTOR_2 0.59f
 #define TARGET_WEIGHT_FACTOR_3 0.34f
 
-#define FAN_CHANNEL               LEDC_CHANNEL_1
-#define FAN_TIMER                 LEDC_TIMER_1
-#define STEP_LEDC_CHANNEL         LEDC_CHANNEL_3
-#define STEP_LEDC_TIMER           LEDC_TIMER_2
+#define FAN_CHANNEL LEDC_CHANNEL_1
+#define FAN_TIMER LEDC_TIMER_1
+
+#define STEP_LEDC_CHANNEL LEDC_CHANNEL_3
+#define STEP_LEDC_TIMER LEDC_TIMER_2
+
+#define SERVO_LEDC_CHANNEL LEDC_CHANNEL_0
+#define SERVO_LEDC_TIMER LEDC_TIMER_3
 
 // ------------------- BLE UUIDs -----------------------------------
-#define SERVICE_UUID              "9E05D06D-68A7-4E1F-A503-AE26713AC101"
-#define CHARACTERISTIC_UUID       "7CB2F1B4-7E3F-43D2-8C92-DF58C9A7B1A8"
+#define SERVICE_UUID "9E05D06D-68A7-4E1F-A503-AE26713AC101"
+#define CHARACTERISTIC_UUID "7CB2F1B4-7E3F-43D2-8C92-DF58C9A7B1A8"
 
 // ------------------- Direct settings variables -------------------
-int speedPercent = 85;                          // 50-100
-int motorDirection = 0;                         // 0, 1
-int ledBrightness = 50;                         // 0-100
-bool useFilamentSensor = true;                  // true, false
-int motorStrength = 100;                        // 80-120
-int targetWeight = 0;                           // 0-3
-int torqueLimit = 0;                            // 0-3
-int jingleStyle = 0;                            // 0-3
-unsigned long calibrationAt80Speed = 895000;    // ms
-String wifiSSID = "";                           // string
-String wifiPassword = "";                       // string
-int fanSpeed = 60;                              // 0–100
-bool fanAlwaysOn = false;                       // true, false
+int speedPercent = 85;                        // 50-100
+int motorDirection = 0;                       // 0, 1
+int ledBrightness = 50;                       // 0-100
+bool useFilamentSensor = true;                // true, false
+int motorStrength = 100;                      // 80-120
+int targetWeight = 0;                         // 0-3
+int torqueLimit = 0;                          // 0-3
+int jingleStyle = 0;                          // 0-3
+unsigned long calibrationAt80Speed = 895000;  // ms
+
+String wifiSSID = "";      // string
+String wifiPassword = "";  // string
+
+int fanSpeed = 60;         // 0–100
+bool fanAlwaysOn = false;  // true, false
 unsigned long fanStopAfter = 0;
+
+int servoAngleR = 5;        // deg
+int servoAngleL = 175;      // deg
+float servoStepMm = 1.75f;  // mm
+bool servoHomeIsR = true;   // true, false
+
+// ----------------- Board variant identifier -----------------
+uint8_t boardVariant = 0;
 
 // --------------- High-Speed mode state -----------------
 bool highSpeedMode = false;
 int savedTorqueLimitHS = 0;
 unsigned long baseTargetStepIntervalMicros = DEFAULT_INTERVAL_US;
 
-// -------------------- Status variables & objects ------------------
+// -------------- Status variables and objects -----------------
 HardwareSerial TMCSerial(1);
 TMC2209Stepper driver(&TMCSerial, R_SENSE, 0);
 NimBLECharacteristic* pCharacteristic = nullptr;
 Preferences prefs;
+String serialRxLine;
 
-StaticJsonDocument<512> lastStatusDoc;
+float guideServoPos = 0.0f;
+bool guideServoTowardsL = true;
+float motorStepAcc = 0.0f;
+unsigned long lastMotorStepAccTime = 0;
+bool servoWasRunning = false;
+char lastStateForServo = 'I';
+bool servoHomingToHome = false;
+unsigned long lastServoHomeStepTime = 0;
+bool servoHomeAfterDonePending = false;
+char lastStateForDone = 'I';
+bool servoGotoActive = false;
+char servoGotoSide = 0;
+
+StaticJsonDocument<640> lastStatusDoc;
 
 bool deviceConnected = false;
 bool isMotorRunning = false;
@@ -152,67 +181,99 @@ uint16_t greenDitherAcc = 0;
 TaskHandle_t otaLedPulseTaskHandle = nullptr;
 TaskHandle_t wifiScanTaskHandle = nullptr;
 void otaLedPulseTask(void* parameter) {
-    pwmValue = calculatePWM(ledBrightness);
-    int otaLedPulse = 0;
-    int otaLedDir = 1;
-    uint16_t blueDitherAcc = 0;
+  pwmValue = calculatePWM(ledBrightness);
+  int otaLedPulse = 0;
+  int otaLedDir = 1;
+  uint16_t blueDitherAcc = 0;
 
-    while (otaInProgress) {
-        otaLedPulse += otaLedDir * 1;
-        if (otaLedPulse >= LED_CONN_PULSE_MAX) { otaLedPulse = LED_CONN_PULSE_MAX; otaLedDir = -1; }
-        else if (otaLedPulse <= 0) { otaLedPulse = 0; otaLedDir =  1; }
-
-        setConnLed((uint8_t)otaLedPulse);
-
-        uint16_t pulse255 = (uint16_t)((otaLedPulse * 255 + (LED_CONN_PULSE_MAX/2)) / LED_CONN_PULSE_MAX);
-        uint16_t scaled16 = (uint16_t)pulse255 * (uint16_t)pwmValue;
-        uint8_t baseVal = scaled16 / 255;
-        uint8_t remainder = scaled16 % 255;
-        blueDitherAcc = (uint16_t)(blueDitherAcc + remainder);
-        if (blueDitherAcc >= 255) { baseVal++; blueDitherAcc -= 255; }
-      
-        led.setPixelColor(0, led.Color(0, 0, baseVal));
-        led.show();
-        vTaskDelay(5 / portTICK_PERIOD_MS);
+  while (otaInProgress) {
+    otaLedPulse += otaLedDir * 1;
+    if (otaLedPulse >= LED_CONN_PULSE_MAX) {
+      otaLedPulse = LED_CONN_PULSE_MAX;
+      otaLedDir = -1;
+    } else if (otaLedPulse <= 0) {
+      otaLedPulse = 0;
+      otaLedDir = 1;
     }
-    setConnLed(LED_CONN_PULSE_MAX);
-    led.setPixelColor(0, 0);
+
+    setConnLed((uint8_t)otaLedPulse);
+
+    uint16_t pulse255 = (uint16_t)((otaLedPulse * 255 + (LED_CONN_PULSE_MAX / 2)) / LED_CONN_PULSE_MAX);
+    uint16_t scaled16 = (uint16_t)pulse255 * (uint16_t)pwmValue;
+    uint8_t baseVal = scaled16 / 255;
+    uint8_t remainder = scaled16 % 255;
+    blueDitherAcc = (uint16_t)(blueDitherAcc + remainder);
+    if (blueDitherAcc >= 255) {
+      baseVal++;
+      blueDitherAcc -= 255;
+    }
+
+    led.setPixelColor(0, led.Color(0, 0, baseVal));
     led.show();
-    vTaskDelete(NULL);
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+  }
+  setConnLed(LED_CONN_PULSE_MAX);
+  led.setPixelColor(0, 0);
+  led.show();
+  vTaskDelete(NULL);
+}
+
+void pollSerialCommands() {
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+
+    if (c == '\n') {
+      serialRxLine.trim();
+      if (serialRxLine.length() > 0) {
+        if (serialRxLine.length() > 512) {
+          serialRxLine = "";
+        } else {
+          std::string cmd(serialRxLine.c_str());
+          handleCommand(cmd);
+          serialRxLine = "";
+        }
+      } else {
+        serialRxLine = "";
+      }
+    } else {
+      if (serialRxLine.length() < 512) serialRxLine += c;
+    }
+  }
 }
 
 void wifiScanTask(void* parameter) {
-    WiFi.disconnect(true);
-    int n = WiFi.scanNetworks();
-    StaticJsonDocument<256> ssidDoc;
-    JsonArray arr = ssidDoc.createNestedArray("SSID_LIST");
-    for (int i = 0; i < n; i++) {
-        int rssi = WiFi.RSSI(i);
-        if (rssi > MIN_RSSI_THRESHOLD) {
-            String ssid = WiFi.SSID(i);
-            if (ssid.length() > 0 && ssid.length() < 33) {
-                arr.add(ssid);
-            }
-        }
+  WiFi.disconnect(true);
+  int n = WiFi.scanNetworks();
+  StaticJsonDocument<256> ssidDoc;
+  JsonArray arr = ssidDoc.createNestedArray("SSID_LIST");
+  for (int i = 0; i < n; i++) {
+    int rssi = WiFi.RSSI(i);
+    if (rssi > MIN_RSSI_THRESHOLD) {
+      String ssid = WiFi.SSID(i);
+      if (ssid.length() > 0 && ssid.length() < 33) {
+        arr.add(ssid);
+      }
     }
-    if (deviceConnected && pCharacteristic) {
-        String jsonOut;
-        serializeJson(ssidDoc, jsonOut);
-        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-        pCharacteristic->setValue(jsonOut.c_str());
-        pCharacteristic->notify();
-        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-    }
-    WiFi.scanDelete();
-    prefs.begin("respooler", true);
-    String ssid = prefs.getString("ssid", "");
-    String pwd = prefs.getString("pwd", "");
-    prefs.end();
-    if (ssid.length() > 0 && pwd.length() > 0) {
-        WiFi.begin(ssid.c_str(), pwd.c_str());
-    }
-    wifiScanTaskHandle = nullptr;
-    vTaskDelete(NULL);
+  }
+  if (deviceConnected && pCharacteristic) {
+    String jsonOut;
+    serializeJson(ssidDoc, jsonOut);
+    if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+    pCharacteristic->setValue(jsonOut.c_str());
+    pCharacteristic->notify();
+    if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+  }
+  WiFi.scanDelete();
+  prefs.begin("respooler", true);
+  String ssid = prefs.getString("ssid", "");
+  String pwd = prefs.getString("pwd", "");
+  prefs.end();
+  if (ssid.length() > 0 && pwd.length() > 0) {
+    WiFi.begin(ssid.c_str(), pwd.c_str());
+  }
+  wifiScanTaskHandle = nullptr;
+  vTaskDelete(NULL);
 }
 
 // -------------- Wi-Fi connect async status --------------
@@ -221,862 +282,480 @@ unsigned long wifiConnectStartTime = 0;
 
 // ------------------ Helper and utility functions ---------------
 int calculatePWM(int brightnessPercent) {
-    float gamma = 1.15f;
-    float n = (float)constrain(brightnessPercent, 0, 100) / 100.0f;
-    return (int)round(powf(n, gamma) * 255.0f);
+  float gamma = 1.15f;
+  float n = (float)constrain(brightnessPercent, 0, 100) / 100.0f;
+  return (int)round(powf(n, gamma) * 255.0f);
 }
 int fanPWMFromSpeed(int percent) {
-    return map(constrain(percent, 0, 100), 0, 100, 0, 255);
+  return map(constrain(percent, 0, 100), 0, 100, 0, 255);
+}
+
+inline void setServoAngle(int angle) {
+  angle = constrain(angle, 0, 180);
+  int pulseUs = map(angle, 0, 180, 500, 2500);
+  uint32_t duty = (uint32_t)((((uint64_t)pulseUs) * ((1UL << 14) - 1) + 10000UL) / 20000UL);
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, SERVO_LEDC_CHANNEL, duty);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, SERVO_LEDC_CHANNEL);
 }
 inline void setConnLed(uint8_t duty) {
-    duty = constrain(duty, 0, 255);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, 255 - duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+  duty = constrain(duty, 0, 255);
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, 255 - duty);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
 }
 inline uint32_t stepFreqFromIntervalUs(unsigned long us) {
-    if (us < 1) us = 1;
-    return (uint32_t)(1000000UL / (2UL * us));
+  if (us < 1) us = 1;
+  return (uint32_t)(1000000UL / (2UL * us));
 }
 inline void stepperSetFreq(uint32_t freqHz) {
-    if (freqHz < 1) freqHz = 1;
-    ledc_set_freq(LEDC_LOW_SPEED_MODE, STEP_LEDC_TIMER, freqHz);
+  if (freqHz < 1) freqHz = 1;
+  ledc_set_freq(LEDC_LOW_SPEED_MODE, STEP_LEDC_TIMER, freqHz);
 }
 inline void stepperStart(uint32_t freqHz) {
-    stepperSetFreq(freqHz);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, STEP_DUTY_ON);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL);
+  stepperSetFreq(freqHz);
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, STEP_DUTY_ON);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL);
 }
 inline void stepperStop() {
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL);
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL);
 }
 int getSpeedPercentFromInterval(unsigned long us) {
-    double t = (double)us;
-    double p = 50.0 + ((170.0 - t) * 50.0 / (170.0 - 93.0));
-    int percent = (int)round(p);
-    return constrain(percent, 50, 100);
+  double t = (double)us;
+  double p = 50.0 + ((170.0 - t) * 50.0 / (170.0 - 93.0));
+  int percent = (int)round(p);
+  return constrain(percent, 50, 100);
 }
 
 void applySpeedTarget() {
-    if (highSpeedMode) {
-        unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
-        if (adjusted < 50) adjusted = 50;
-        targetStepIntervalMicros = adjusted;
-    } else {
-        targetStepIntervalMicros = baseTargetStepIntervalMicros;
-    }
+  if (highSpeedMode) {
+    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
+    if (adjusted < 50) adjusted = 50;
+    targetStepIntervalMicros = adjusted;
+  } else {
+    targetStepIntervalMicros = baseTargetStepIntervalMicros;
+  }
 }
+
 void loadSettings() {
-    prefs.begin("respooler", true);
-    baseTargetStepIntervalMicros = prefs.getUInt("speed", DEFAULT_INTERVAL_US);
-    speedPercent = getSpeedPercentFromInterval(baseTargetStepIntervalMicros);
-    applySpeedTarget();
-    motorDirection = prefs.getUInt("dir", 0);
-    ledBrightness = prefs.getUInt("led", 50);
-    useFilamentSensor = prefs.getBool("filamentSensor", true);
-    motorStrength = prefs.getUInt("motorStrength", 100);
-    torqueLimit = prefs.getUInt("torqueLimit", 0);
-    highSpeedMode = prefs.getBool("hsMode", false);
-    if (highSpeedMode) {
-        savedTorqueLimitHS = torqueLimit;
-        torqueLimit = 0;
-    }
-    jingleStyle = prefs.getUInt("jingle", 0);
-    calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
-    fanSpeed = prefs.getUInt("fanSpeed", 60);
-    fanAlwaysOn = prefs.getBool("fanAlways", false);
-    targetWeight = prefs.getUInt("targetWeight", 0);
-    applySpeedTarget();
-    prefs.end();
-    setMotorCurrent(motorStrength);
-    pwmValue = calculatePWM(ledBrightness);
-    digitalWrite(DIR_PIN, motorDirection);
+  prefs.begin("respooler", true);
+  boardVariant = prefs.getUChar("variant", 0);
+  baseTargetStepIntervalMicros = prefs.getUInt("speed", DEFAULT_INTERVAL_US);
+  speedPercent = getSpeedPercentFromInterval(baseTargetStepIntervalMicros);
+  applySpeedTarget();
+  motorDirection = prefs.getUInt("dir", 0);
+  ledBrightness = prefs.getUInt("led", 50);
+  useFilamentSensor = prefs.getBool("filamentSensor", true);
+  motorStrength = prefs.getUInt("motorStrength", 100);
+  torqueLimit = prefs.getUInt("torqueLimit", 0);
+  highSpeedMode = prefs.getBool("hsMode", false);
+  if (highSpeedMode) {
+    savedTorqueLimitHS = torqueLimit;
+    torqueLimit = 0;
+  }
+  jingleStyle = prefs.getUInt("jingle", 0);
+  calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
+  fanSpeed = prefs.getUInt("fanSpeed", 60);
+  fanAlwaysOn = prefs.getBool("fanAlways", false);
+  targetWeight = prefs.getUInt("targetWeight", 0);
+
+  servoAngleR = (int)prefs.getUInt("servoR", 5);
+  servoAngleL = (int)prefs.getUInt("servoL", 175);
+  servoStepMm = prefs.getFloat("servoStep", 1.75f);
+  servoHomeIsR = prefs.getBool("servoHomeR", true);
+
+  servoAngleR = constrain(servoAngleR, 0, 180);
+  servoAngleL = constrain(servoAngleL, 0, 180);
+  servoStepMm = constrain(servoStepMm, 0.05f, 20.0f);
+
+  applySpeedTarget();
+  prefs.end();
+  setMotorCurrent(motorStrength);
+  pwmValue = calculatePWM(ledBrightness);
+  digitalWrite(DIR_PIN, motorDirection);
 }
+
 void setMotorCurrent(int percent) {
-    int strengthCurrent = map(percent, 80, 120, 700, 1400);
-    driver.rms_current(strengthCurrent);
+  int strengthCurrent = map(percent, 80, 120, 700, 1400);
+  driver.rms_current(strengthCurrent);
 }
 
 void reSanitizeDriver() {
-    driver.GSTAT(0b111);
-    driver.en_spreadCycle(false);
-    driver.pwm_autoscale(true);
-    driver.pwm_autograd(true);
-    driver.microsteps(MICROSTEPPING);
-    setMotorCurrent(motorStrength);
+  driver.GSTAT(0b111);
+  driver.en_spreadCycle(false);
+  driver.pwm_autoscale(true);
+  driver.pwm_autograd(true);
+  driver.microsteps(MICROSTEPPING);
+  setMotorCurrent(motorStrength);
 }
 
 // ------------------- BLE status/error/settings -------------------
 void sendStatus(bool forceSend = false) {
-    if (!deviceConnected || !pCharacteristic) return;
+  if (!deviceConnected || !pCharacteristic) return;
 
-    float progVal = progress;
-    int remVal = 0;
-    if (currentState == 'D') {
-        progVal = 100.0f;
-        remVal = 0;
-    } else if (totalEstimatedTime > 0) {
-        unsigned long elapsed;
-        if (spoolingStartTime > 0) {
-            elapsed = millis() - spoolingStartTime;
-        } else if (pausedElapsed > 0) {
-            elapsed = pausedElapsed;
-        } else if (currentState == 'A') {
-            elapsed = pausedElapsed;
-        } else {
-            elapsed = 0;
-        }
-        unsigned long effectiveTotal = totalEstimatedTime;
-        if (targetWeight == 2) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_2);
-        else if (targetWeight == 3) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_3);
-
-        if (effectiveTotal == 0) {
-            progVal = 0.0f;
-            remVal = 0;
-        } else if (elapsed >= effectiveTotal) {
-            progVal = 100.0f;
-            remVal = 0;
-        } else {
-            progVal = (100.0f * (float)elapsed) / (float)effectiveTotal;
-            unsigned long remainingMs = effectiveTotal - elapsed;
-            remVal = (int)(remainingMs / 1000UL);
-        }
+  float progVal = progress;
+  int remVal = 0;
+  if (currentState == 'D') {
+    progVal = 100.0f;
+    remVal = 0;
+  } else if (totalEstimatedTime > 0) {
+    unsigned long elapsed;
+    if (spoolingStartTime > 0) {
+      elapsed = millis() - spoolingStartTime;
+    } else if (pausedElapsed > 0) {
+      elapsed = pausedElapsed;
+    } else if (currentState == 'A') {
+      elapsed = pausedElapsed;
+    } else {
+      elapsed = 0;
     }
-    if (remHoldActive) {
-        unsigned long nowMs = millis();
-        if (nowMs < remHoldExpiry) {
-            remVal = lastRemainingTime;
-        } else {
-            remHoldActive = false;
-        }
+    unsigned long effectiveTotal = totalEstimatedTime;
+    if (targetWeight == 2) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_2);
+    else if (targetWeight == 3) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_3);
+    if (effectiveTotal == 0) {
+      progVal = 0.0f;
+      remVal = 0;
+    } else if (elapsed >= effectiveTotal) {
+      progVal = 100.0f;
+      remVal = 0;
+    } else {
+      progVal = (100.0f * (float)elapsed) / (float)effectiveTotal;
+      unsigned long remainingMs = effectiveTotal - elapsed;
+      remVal = (int)(remainingMs / 1000UL);
     }
-    if (progHoldActive) {
-        unsigned long nowMs = millis();
-        if (nowMs < progHoldExpiry) {
-            progVal = lastProgress;
-        } else {
-            progHoldActive = false;
-        }
+  }
+  if (remHoldActive) {
+    unsigned long nowMs = millis();
+    if (nowMs < remHoldExpiry) {
+      remVal = lastRemainingTime;
+    } else {
+      remHoldActive = false;
     }
-    if (currentState == 'R') {
-        unsigned long nowMs = millis();
-        if (nowMs < remStartHoldUntil) {
-            remVal = lastRemainingTime;
-        }
+  }
+  if (progHoldActive) {
+    unsigned long nowMs = millis();
+    if (nowMs < progHoldExpiry) {
+      progVal = lastProgress;
+    } else {
+      progHoldActive = false;
     }
-    int chipTemp = (int)temperatureRead();
+  }
+  if (currentState == 'R') {
+    unsigned long nowMs = millis();
+    if (nowMs < remStartHoldUntil) {
+      remVal = lastRemainingTime;
+    }
+  }
+  int chipTemp = (int)temperatureRead();
 
-    StaticJsonDocument<512> doc;
-    doc["STAT"] = String(currentState);
-    doc["HAS_FIL"] = filamentDetected;
-    doc["USE_FIL"] = useFilamentSensor;
-    doc["PROG"] = progVal;
-    doc["REM"] = remVal;
-    doc["TEMP"] = chipTemp;
-    doc["WIFI_SSID"] = wifiSSID.length() > 0 ? wifiSSID.c_str() : nullptr;
-    doc["WIFI_OK"] = WiFi.status() == WL_CONNECTED;
-    doc["FW"] = FIRMWARE_VERSION;
-    doc["OTA_OK"] = nullptr;
-    doc["SPD"] = speedPercent;
-    doc["JIN"] = jingleStyle;
-    doc["LED"] = ledBrightness;
-    doc["DIR"] = motorDirection;
-    doc["POW"] = motorStrength;
-    doc["TRQ"] = highSpeedMode ? 0 : torqueLimit;
-    doc["WGT"] = targetWeight;
-    doc["DUR"] = calibrationAt80Speed / 1000;
-    doc["HS"]  = highSpeedMode;
-    doc["FAN_SPD"] = fanSpeed;
-    doc["FAN_ON"] = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter);
-    doc["FAN_ALW"] = fanAlwaysOn;
+  StaticJsonDocument<640> doc;
+  doc["STAT"] = String(currentState);
+  doc["HAS_FIL"] = filamentDetected;
+  doc["USE_FIL"] = useFilamentSensor;
+  doc["PROG"] = progVal;
+  doc["REM"] = remVal;
+  doc["TEMP"] = chipTemp;
+  doc["WIFI_SSID"] = wifiSSID.length() > 0 ? wifiSSID.c_str() : nullptr;
+  doc["WIFI_OK"] = WiFi.status() == WL_CONNECTED;
+  doc["FW"] = FIRMWARE_VERSION;
+  doc["OTA_OK"] = nullptr;
+  doc["SPD"] = speedPercent;
+  doc["JIN"] = jingleStyle;
+  doc["LED"] = ledBrightness;
+  doc["DIR"] = motorDirection;
+  doc["POW"] = motorStrength;
+  doc["TRQ"] = highSpeedMode ? 0 : torqueLimit;
+  doc["WGT"] = targetWeight;
+  doc["DUR"] = calibrationAt80Speed / 1000;
+  doc["HS"] = highSpeedMode;
+  doc["FAN_SPD"] = fanSpeed;
+  doc["FAN_ON"] = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter);
+  doc["FAN_ALW"] = fanAlwaysOn;
+  doc["SV_R"] = servoAngleR;
+  doc["SV_L"] = servoAngleL;
+  doc["SV_STP"] = servoStepMm;
+  doc["SV_HOME"] = servoHomeIsR ? "R" : "L";
+  doc["VAR"] = (boardVariant == 2) ? "PRO" : (boardVariant == 1) ? "STD"
+                                                                 : "UNK";
 
-    lastIsMotorRunning = isMotorRunning;
-    lastFilamentDetected = filamentDetected;
-    lastProgress = progVal;
-    lastChipTemperature = chipTemp;
-    lastRemainingTime = remVal;
-    lastSpeedPercent = speedPercent;
+  lastIsMotorRunning = isMotorRunning;
+  lastFilamentDetected = filamentDetected;
+  lastProgress = progVal;
+  lastChipTemperature = chipTemp;
+  lastRemainingTime = remVal;
+  lastSpeedPercent = speedPercent;
 
-    String jsonOut;
-    serializeJson(doc, jsonOut);
-    if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-    pCharacteristic->setValue(jsonOut.c_str());
-    pCharacteristic->notify();
-    if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+  String jsonOut;
+  serializeJson(doc, jsonOut);
+  if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+  pCharacteristic->setValue(jsonOut.c_str());
+  pCharacteristic->notify();
+  if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
 }
 
 // ------------------- Stepper jingle/tones --------------------------
 void playTone(unsigned int freqHz, unsigned long durationMs) {
-    uint16_t prevCurrent = driver.rms_current();
-    driver.rms_current(1400);
-    unsigned long halfPeriod = 1000000UL / (2 * freqHz);
-    unsigned long totalCycles = (durationMs * 1000UL) / (2 * halfPeriod);
-    bool dirState = false;
-    for (unsigned long i = 0; i < totalCycles; i++) {
-        dirState = !dirState;
-        digitalWrite(DIR_PIN, dirState);
-        digitalWrite(STEP_PIN, HIGH);
-        delayMicroseconds(40);
-        digitalWrite(STEP_PIN, LOW);
-        delayMicroseconds(halfPeriod * 2 - 40);
-    }
-    driver.rms_current(prevCurrent);
+  uint16_t prevCurrent = driver.rms_current();
+  driver.rms_current(1400);
+  unsigned long halfPeriod = 1000000UL / (2 * freqHz);
+  unsigned long totalCycles = (durationMs * 1000UL) / (2 * halfPeriod);
+  bool dirState = false;
+  for (unsigned long i = 0; i < totalCycles; i++) {
+    dirState = !dirState;
+    digitalWrite(DIR_PIN, dirState);
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(40);
+    digitalWrite(STEP_PIN, LOW);
+    delayMicroseconds(halfPeriod * 2 - 40);
+  }
+  driver.rms_current(prevCurrent);
 }
 void playStepperJingle() {
-    if (jingleStyle == 0) return;
-    delay(500);
-    stepperStop();
-    ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
-    gpio_reset_pin((gpio_num_t)STEP_PIN);
-    gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
-    digitalWrite(EN_PIN, LOW);
-    digitalWrite(STEP_PIN, LOW);
-    {
-        led.setPixelColor(0, led.Color(0, pwmValue, 0));
-        led.show();
-    }
-    switch (jingleStyle) {
-        case 1: // simple
-            playTone(1000, 140); delay(20);
-            playTone(800, 140); delay(20);
-            playTone(1200, 400);
-            break;
-        case 2: // glissando
-            playTone(523, 220); delay(20);
-            playTone(587, 70); delay(20);
-            playTone(659, 70); delay(20);
-            playTone(698, 70); delay(20);
-            playTone(784, 70); delay(20);
-            playTone(880, 70); delay(20);
-            playTone(988, 100); delay(20);
-            playTone(1047, 400);
-            break;
-        case 3: // Star Wars
-            playTone(440, 400); delay(40);
-            playTone(440, 400); delay(40);
-            playTone(440, 400); delay(40);
-            playTone(349, 250); delay(40);
-            playTone(523, 150); delay(40);
-            playTone(440, 400); delay(40);
-            playTone(349, 250); delay(40);
-            playTone(523, 150); delay(40);
-            playTone(440, 500);
-            break;
-    }
-    digitalWrite(EN_PIN, HIGH);
-    {
-        ledc_channel_config_t step_ledc_chan = {
-            .gpio_num       = STEP_PIN,
-            .speed_mode     = LEDC_LOW_SPEED_MODE,
-            .channel        = STEP_LEDC_CHANNEL,
-            .intr_type      = LEDC_INTR_DISABLE,
-            .timer_sel      = STEP_LEDC_TIMER,
-            .duty           = 0,
-            .hpoint         = 0
-        };
-        ledc_channel_config(&step_ledc_chan);
-    }
-    stepperStop();
+  if (jingleStyle == 0) return;
+  delay(500);
+  stepperStop();
+  ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
+  gpio_reset_pin((gpio_num_t)STEP_PIN);
+  gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
+  digitalWrite(EN_PIN, LOW);
+  digitalWrite(STEP_PIN, LOW);
+  {
+    led.setPixelColor(0, led.Color(0, pwmValue, 0));
+    led.show();
+  }
+  switch (jingleStyle) {
+    case 1:  // Simple
+      playTone(1000, 140);
+      delay(20);
+      playTone(800, 140);
+      delay(20);
+      playTone(1200, 400);
+      break;
+    case 2:  // Glissando
+      playTone(523, 220);
+      delay(20);
+      playTone(587, 70);
+      delay(20);
+      playTone(659, 70);
+      delay(20);
+      playTone(698, 70);
+      delay(20);
+      playTone(784, 70);
+      delay(20);
+      playTone(880, 70);
+      delay(20);
+      playTone(988, 100);
+      delay(20);
+      playTone(1047, 400);
+      break;
+    case 3:  // Star Wars
+      playTone(440, 400);
+      delay(40);
+      playTone(440, 400);
+      delay(40);
+      playTone(440, 400);
+      delay(40);
+      playTone(349, 250);
+      delay(40);
+      playTone(523, 150);
+      delay(40);
+      playTone(440, 400);
+      delay(40);
+      playTone(349, 250);
+      delay(40);
+      playTone(523, 150);
+      delay(40);
+      playTone(440, 500);
+      break;
+  }
+  digitalWrite(EN_PIN, HIGH);
+  {
+    ledc_channel_config_t step_ledc_chan = {
+      .gpio_num = STEP_PIN,
+      .speed_mode = LEDC_LOW_SPEED_MODE,
+      .channel = STEP_LEDC_CHANNEL,
+      .intr_type = LEDC_INTR_DISABLE,
+      .timer_sel = STEP_LEDC_TIMER,
+      .duty = 0,
+      .hpoint = 0
+    };
+    ledc_channel_config(&step_ledc_chan);
+  }
+  stepperStop();
 }
 
 // --------------------- BLE command handling -------------------------
 void sendOTAUpdate() {
-    if (otaInProgress) {
-        return;
+  if (otaInProgress) {
+    return;
+  }
+  isMotorRunning = false;
+  digitalWrite(STEP_PIN, LOW);
+  stepperStop();
+  digitalWrite(EN_PIN, HIGH);
+  currentState = 'U';
+  sendStatus(true);
+  xTaskCreate([](void*) {
+    const char* ota_url = "https://download.lts-design.com/Firmware/ControlBoard_V4_OTA.bin";
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+
+    if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == INADDR_NONE) {
+      currentState = 'I';
+      sendStatus(true);
+      vTaskDelete(NULL);
     }
-    isMotorRunning = false;
-    digitalWrite(STEP_PIN, LOW);
-    stepperStop();
-    digitalWrite(EN_PIN, HIGH);
-    currentState = 'U';
+
+    otaInProgress = true;
     sendStatus(true);
-    xTaskCreate([](void*) {
-        const char* ota_url = "https://download.lts-design.com/Firmware/ControlBoard_V4_OTA.bin";
-        WiFiClientSecure client;
-        client.setInsecure();
-        HTTPClient http;
+    if (otaLedPulseTaskHandle == nullptr) {
+      xTaskCreate(otaLedPulseTask, "OtaLedPulse", 1024, NULL, 2, &otaLedPulseTaskHandle);
+    }
 
-        if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == INADDR_NONE) {
-            currentState = 'I';
+    http.begin(client, ota_url);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    int httpCode = http.GET();
+    bool otaSuccess = false;
+
+    if (httpCode == HTTP_CODE_OK) {
+      int contentLength = http.getSize();
+      if (Update.begin(contentLength)) {
+        WiFiClient* stream = http.getStreamPtr();
+        while (http.connected() && Update.writeStream(*stream) > 0) {
+          delay(1);
+        }
+        if (Update.end() && Update.isFinished()) {
+          otaSuccess = true;
+          if (deviceConnected && pCharacteristic) {
+            StaticJsonDocument<64> doc;
+            doc["OTA_OK"] = true;
+            delay(100);
             sendStatus(true);
-            vTaskDelete(NULL);
+            String jsonOut;
+            serializeJson(doc, jsonOut);
+            if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+            pCharacteristic->setValue(jsonOut.c_str());
+            pCharacteristic->notify();
+            if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+            NimBLEDevice::deinit(true);
+            delay(1000);
+          }
+          otaInProgress = false;
+          otaLedPulseTaskHandle = nullptr;
+          ESP.restart();
         }
-
-        otaInProgress = true;
-        sendStatus(true);
-        if (otaLedPulseTaskHandle == nullptr) {
-            xTaskCreate(otaLedPulseTask, "OtaLedPulse", 1024, NULL, 2, &otaLedPulseTaskHandle);
-        }
-
-        http.begin(client, ota_url);
-        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-        int httpCode = http.GET();
-        bool otaSuccess = false;
-
-        if (httpCode == HTTP_CODE_OK) {
-            int contentLength = http.getSize();
-            if (Update.begin(contentLength)) {
-                WiFiClient *stream = http.getStreamPtr();
-                while (http.connected() && Update.writeStream(*stream) > 0) {
-                    delay(1);
-                }
-                if (Update.end() && Update.isFinished()) {
-                    otaSuccess = true;
-                    if (deviceConnected && pCharacteristic) {
-                        StaticJsonDocument<64> doc;
-                        doc["OTA_OK"] = true;
-                        delay(100);
-                        sendStatus(true);
-                        String jsonOut;
-                        serializeJson(doc, jsonOut);
-                        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-                        pCharacteristic->setValue(jsonOut.c_str());
-                        pCharacteristic->notify();
-                        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-                        NimBLEDevice::deinit(true);
-                        delay(1000);
-                    }
-                    otaInProgress = false;
-                    otaLedPulseTaskHandle = nullptr;
-                    ESP.restart();
-                }
-            } else {
-                if (deviceConnected && pCharacteristic) {
-                    StaticJsonDocument<64> doc;
-                    doc["OTA_OK"] = false;
-                    String jsonOut;
-                    serializeJson(doc, jsonOut);
-                    if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-                    pCharacteristic->setValue(jsonOut.c_str());
-                    pCharacteristic->notify();
-                    if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-                }
-                otaInProgress = false;
-                otaLedPulseTaskHandle = nullptr;
-                currentState = 'I';
-                sendStatus(true);
-                vTaskDelete(NULL);
-            }
-        } else {
-            if (deviceConnected && pCharacteristic) {
-                StaticJsonDocument<64> doc;
-                doc["OTA_OK"] = false;
-                String jsonOut;
-                serializeJson(doc, jsonOut);
-                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-                pCharacteristic->setValue(jsonOut.c_str());
-                pCharacteristic->notify();
-                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-            }
-            otaInProgress = false;
-            otaLedPulseTaskHandle = nullptr;
-            currentState = 'I';
-            sendStatus(true);
-            vTaskDelete(NULL);
-        }
-        http.end();
-        if (!otaSuccess) {
-            if (deviceConnected && pCharacteristic) {
-                StaticJsonDocument<64> doc;
-                doc["OTA_OK"] = false;
-                String jsonOut;
-                serializeJson(doc, jsonOut);
-                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-                pCharacteristic->setValue(jsonOut.c_str());
-                pCharacteristic->notify();
-                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-            }
+      } else {
+        if (deviceConnected && pCharacteristic) {
+          StaticJsonDocument<64> doc;
+          doc["OTA_OK"] = false;
+          String jsonOut;
+          serializeJson(doc, jsonOut);
+          if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+          pCharacteristic->setValue(jsonOut.c_str());
+          pCharacteristic->notify();
+          if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
         }
         otaInProgress = false;
         otaLedPulseTaskHandle = nullptr;
         currentState = 'I';
         sendStatus(true);
         vTaskDelete(NULL);
-    }, "OTAUpdateTask", 8192, NULL, 1, NULL);
+      }
+    } else {
+      if (deviceConnected && pCharacteristic) {
+        StaticJsonDocument<64> doc;
+        doc["OTA_OK"] = false;
+        String jsonOut;
+        serializeJson(doc, jsonOut);
+        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+        pCharacteristic->setValue(jsonOut.c_str());
+        pCharacteristic->notify();
+        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+      }
+      otaInProgress = false;
+      otaLedPulseTaskHandle = nullptr;
+      currentState = 'I';
+      sendStatus(true);
+      vTaskDelete(NULL);
+    }
+    http.end();
+    if (!otaSuccess) {
+      if (deviceConnected && pCharacteristic) {
+        StaticJsonDocument<64> doc;
+        doc["OTA_OK"] = false;
+        String jsonOut;
+        serializeJson(doc, jsonOut);
+        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+        pCharacteristic->setValue(jsonOut.c_str());
+        pCharacteristic->notify();
+        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+      }
+    }
+    otaInProgress = false;
+    otaLedPulseTaskHandle = nullptr;
+    currentState = 'I';
+    sendStatus(true);
+    vTaskDelete(NULL);
+  },
+              "OTAUpdateTask", 8192, NULL, 1, NULL);
 }
 
 void handleCommand(const std::string& cmd) {
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, cmd.c_str());
-    if (error) return;
+  StaticJsonDocument<512> doc;
+  DeserializationError error = deserializeJson(doc, cmd.c_str());
+  if (error) return;
 
-    if (doc.containsKey("CMD")) {
-        String command = doc["CMD"].as<String>();
-        if (command == "START") {
-            if (!isMotorRunning) {
-                shouldStartMotorNow = true;
-                delayStartUntil = millis();
-            }
-        }
-        else if (command == "STOP") {
-            if (otaInProgress) {
-                return;
-            }
-            if (currentState == 'A') {
-                remHoldActive = true;
-                remHoldExpiry = millis() + 200;
-                progHoldActive = true;
-                progHoldExpiry = millis() + 200;
-                isMotorRunning = false;
-                shouldStartMotorNow = false;
-                pendingDirectionChange = false;
-                triggerJingleNow = 0;
-                progress = 0.0;
-                totalEstimatedTime = 0;
-                spoolingStartTime = 0;
-                pausedElapsed = 0;
-                filamentLostSince = 0;
-                stepperStop();
-                ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
-                gpio_reset_pin((gpio_num_t)STEP_PIN);
-                gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
-                digitalWrite(STEP_PIN, LOW);
-                digitalWrite(EN_PIN, HIGH);
-                {
-                    ledc_channel_config_t step_ledc_chan = {
-                        .gpio_num       = STEP_PIN,
-                        .speed_mode     = LEDC_LOW_SPEED_MODE,
-                        .channel        = STEP_LEDC_CHANNEL,
-                        .intr_type      = LEDC_INTR_DISABLE,
-                        .timer_sel      = STEP_LEDC_TIMER,
-                        .duty           = 0,
-                        .hpoint         = 0
-                    };
-                    ledc_channel_config(&step_ledc_chan);
-                }
-                currentState = 'I';
-                sendStatus(true);
-            } else {
-                remHoldActive = true;
-                remHoldExpiry = millis() + 200;
-                progHoldActive = true;
-                progHoldExpiry = millis() + 200;
-                isMotorRunning = false;
-                progress = 0.0;
-                totalEstimatedTime = 0;
-                spoolingStartTime = 0;
-                pausedElapsed = 0;
-                stepperStop();
-                digitalWrite(EN_PIN, HIGH);
-                digitalWrite(STEP_PIN, LOW);
-                currentState = 'I';
-                sendStatus(true);
-            }
-        }
-        else if (command == "PAUSE") {
-            if (isMotorRunning) {
-                isMotorRunning = false;
-                stepperStop();
-                digitalWrite(EN_PIN, HIGH);
-                digitalWrite(STEP_PIN, LOW);
-                unsigned long elapsed = 0;
-                if (spoolingStartTime > 0) {
-                    elapsed = millis() - spoolingStartTime;
-                }
-                pausedElapsed = elapsed;
-                spoolingStartTime = 0;
-                currentState = 'P';
-                sendStatus(true);
-            }
-        }
-        else if (command == "WIFI_SCAN") {
-          if (wifiScanTaskHandle == nullptr) {
-              xTaskCreate(wifiScanTask, "WiFiScan", 4096, NULL, 1, &wifiScanTaskHandle);
-          }
-        }
-        else if (command == "OTA") {
-            if (!otaInProgress) {
-                sendOTAUpdate();
-            }
-        }
-        else if (command == "WIFI_CONNECT") {
-            if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
-                WiFi.disconnect(true);
-                WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
-                wifiConnectInProgress = true;
-                wifiConnectStartTime = millis();
-            }
-        }
-    }
-
-    if (doc.containsKey("SET")) {
-        JsonObject set = doc["SET"].as<JsonObject>();
-        bool changed = false;
-        if (set.containsKey("DIR")) {
-            int dir = set["DIR"];
-            if (dir != motorDirection) {
-                if (isMotorRunning) {
-                    pendingDirectionChange = true;
-                    newMotorDirection = dir;
-                    isMotorRunning = false;
-                    stepperStop();
-                    digitalWrite(EN_PIN, HIGH);
-                    digitalWrite(STEP_PIN, LOW);
-                } else {
-                    motorDirection = dir;
-                    digitalWrite(DIR_PIN, motorDirection);
-                    prefs.begin("respooler", false);
-                    prefs.putUInt("dir", motorDirection);
-                    prefs.end();
-                }
-                changed = true;
-            }
-        }
-        if (set.containsKey("LED")) {
-            ledBrightness = constrain((int)set["LED"], 0, 100);
-            pwmValue = calculatePWM(ledBrightness);
-            prefs.begin("respooler", false);
-            prefs.putUInt("led", ledBrightness);
-            prefs.end();
-            changed = true;
-        }
-        if (set.containsKey("USE_FIL")) {
-            useFilamentSensor = (int)set["USE_FIL"] != 0;
-            prefs.begin("respooler", false);
-            prefs.putBool("filamentSensor", useFilamentSensor);
-            prefs.end();
-            changed = true;
-        }
-        if (set.containsKey("POW")) {
-            motorStrength = constrain((int)set["POW"], 80, 120);
-            setMotorCurrent(motorStrength);
-            prefs.begin("respooler", false);
-            prefs.putUInt("motorStrength", motorStrength);
-            prefs.end();
-            changed = true;
-        }
-        if (set.containsKey("TRQ")) {
-            int newTrq = constrain((int)set["TRQ"], 0, 3);
-            if (highSpeedMode) {
-                savedTorqueLimitHS = newTrq;
-                prefs.begin("respooler", false);
-                prefs.putUInt("torqueLimit", savedTorqueLimitHS);
-                prefs.end();
-                torqueLimit = 0;
-            } else {
-                torqueLimit = newTrq;
-                prefs.begin("respooler", false);
-                prefs.putUInt("torqueLimit", torqueLimit);
-                prefs.end();
-            }
-            changed = true;
-        }
-        if (set.containsKey("JIN")) {
-            int newJingleStyle = constrain((int)set["JIN"], 0, 3);
-            if (newJingleStyle != jingleStyle) {
-                jingleStyle = newJingleStyle;
-                prefs.begin("respooler", false);
-                prefs.putUInt("jingle", jingleStyle);
-                prefs.end();
-                if (!isMotorRunning) triggerJingleNow = jingleStyle;
-                changed = true;
-            }
-        }
-        if (set.containsKey("DUR")) {
-            unsigned long dur = (unsigned long)set["DUR"];
-            if (dur >= 10 && dur <= 20000) {
-                calibrationAt80Speed = dur * 1000UL;
-                prefs.begin("respooler", false);
-                prefs.putULong("cal80_093", calibrationAt80Speed);
-                prefs.end();
-                changed = true;
-            }
-        }
-        if (set.containsKey("WGT")) {
-            int newWgt = constrain((int)set["WGT"], 0, 3);
-            targetWeight = newWgt;
-            prefs.begin("respooler", false);
-            prefs.putUInt("targetWeight", (unsigned int)targetWeight);
-            prefs.end();
-            changed = true;
-        }
-        if (set.containsKey("SPD")) {
-            int speed = constrain((int)set["SPD"], 50, 100);
-            double span = 170.0 - 93.0;
-            double baseInterval = 170.0 - ((double)(speed - 50) * span / 50.0);
-            baseTargetStepIntervalMicros = (unsigned long)lround(baseInterval);
-            speedPercent = speed;
-            prefs.begin("respooler", false);
-            prefs.putUInt("speed", baseTargetStepIntervalMicros);
-            prefs.end();
-            applySpeedTarget();
-            changed = true;
-        }
-        if (set.containsKey("HS")) {
-            bool newHS = (int)set["HS"] != 0;
-            if (newHS != highSpeedMode) {
-                if (newHS) {
-                    highSpeedMode = true;
-                    savedTorqueLimitHS = torqueLimit;
-                    torqueLimit = 0;
-                    applySpeedTarget();
-                    prefs.begin("respooler", false);
-                    prefs.putBool("hsMode", true);
-                    prefs.end();
-                } else {
-                    highSpeedMode = false;
-                    torqueLimit = savedTorqueLimitHS;
-                    applySpeedTarget();
-                    prefs.begin("respooler", false);
-                    prefs.putBool("hsMode", false);
-                    prefs.putUInt("torqueLimit", torqueLimit);
-                    prefs.end();
-                }
-                changed = true;
-            }
-        }
-        if (set.containsKey("FAN_SPD")) {
-            fanSpeed = constrain((int)set["FAN_SPD"], 0, 100);
-            prefs.begin("respooler", false);
-            prefs.putUInt("fanSpeed", fanSpeed);
-            prefs.end();
-            changed = true;
-        }
-        if (set.containsKey("FAN_ALW")) {
-            fanAlwaysOn = (int)set["FAN_ALW"] != 0;
-            prefs.begin("respooler", false);
-            prefs.putBool("fanAlways", fanAlwaysOn);
-            prefs.end();
-            changed = true;
-        }
-        if (set.containsKey("WIFI_SSID")) {
-            wifiSSID = set["WIFI_SSID"].as<String>();
-            changed = true;
-        }
-        if (set.containsKey("WIFI_PASS")) {
-            wifiPassword = set["WIFI_PASS"].as<String>();
-            changed = true;
-        }
-        if (changed) {
-            prefs.begin("respooler", false);
-            prefs.putString("ssid", wifiSSID);
-            prefs.putString("pwd", wifiPassword);
-            prefs.end();
-            sendStatus(true);
-        }
-    }
-}
-
-// ------------------- BLE callback classes ------------------------
-class MyServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer, NimBLEConnInfo&) override {
-        deviceConnected = true;
-        if (pServer->getConnectedCount() < 2) {
-            NimBLEDevice::startAdvertising();
-        }
-        xTaskCreate([](void*) {
-            delay(1100);
-            sendStatus(true);
-            vTaskDelete(NULL);
-        }, "delayedSend", 2048, NULL, 1, NULL);
-    }
-    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo&, int) override {
-        deviceConnected = pServer->getConnectedCount() > 0;
-        if (pServer->getConnectedCount() < 2) {
-            NimBLEDevice::startAdvertising();
-        }
-    }
-};
-class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo&) override {
-        std::string rx = pChar->getValue();
-        if (!rx.empty()) handleCommand(rx);
-    }
-};
-
-// -------------------------- Setup --------------------------------
-void setup() {
-    esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
-    esp_coex_preference_set(ESP_COEX_PREFER_BT);
-    pinMode(FILAMENT_PIN, INPUT_PULLUP);
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
-    pinMode(STEP_PIN, OUTPUT);
-    pinMode(DIR_PIN, OUTPUT);
-    pinMode(EN_PIN, OUTPUT); digitalWrite(EN_PIN, HIGH);
-    pinMode(LED_PIN, OUTPUT);
-    pinMode(LED_CONN_PIN, OUTPUT);
-
-    pinMode(FAN_PIN, OUTPUT);
-
-    ledc_timer_config_t timer_conf = {
-      .speed_mode       = LEDC_LOW_SPEED_MODE,
-      .duty_resolution  = LEDC_TIMER_8_BIT,
-      .timer_num        = FAN_TIMER,
-      .freq_hz          = 35000,
-      .clk_cfg          = LEDC_AUTO_CLK
-    };
-    ledc_timer_config(&timer_conf);
-
-    ledc_channel_config_t channel_conf = {
-      .gpio_num       = FAN_PIN,
-      .speed_mode     = LEDC_LOW_SPEED_MODE,
-      .channel        = FAN_CHANNEL,
-      .intr_type      = LEDC_INTR_DISABLE,
-      .timer_sel      = FAN_TIMER,
-      .duty           = 0,
-      .hpoint         = 0
-    };
-    ledc_channel_config(&channel_conf);
-
-    ledc_timer_config_t conn_led_timer = {
-        .speed_mode      = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_8_BIT,
-        .timer_num       = LEDC_TIMER_0,
-        .freq_hz         = 1000,
-        .clk_cfg         = LEDC_AUTO_CLK
-    };
-    ledc_timer_config(&conn_led_timer);
-
-    ledc_channel_config_t conn_led_conf = {
-      .gpio_num       = LED_CONN_PIN,
-      .speed_mode     = LEDC_LOW_SPEED_MODE,
-      .channel        = LEDC_CHANNEL_2,
-      .intr_type      = LEDC_INTR_DISABLE,
-      .timer_sel      = LEDC_TIMER_0,
-      .duty           = 0,
-      .hpoint         = 0
-    };
-    ledc_channel_config(&conn_led_conf);
-
-    ledc_timer_config_t step_ledc_timer = {
-        .speed_mode      = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_10_BIT,
-        .timer_num       = STEP_LEDC_TIMER,
-        .freq_hz         = 1000,
-        .clk_cfg         = LEDC_AUTO_CLK
-    };
-    ledc_timer_config(&step_ledc_timer);
-
-    ledc_channel_config_t step_ledc_chan = {
-        .gpio_num       = STEP_PIN,
-        .speed_mode     = LEDC_LOW_SPEED_MODE,
-        .channel        = STEP_LEDC_CHANNEL,
-        .intr_type      = LEDC_INTR_DISABLE,
-        .timer_sel      = STEP_LEDC_TIMER,
-        .duty           = 0,
-        .hpoint         = 0
-    };
-    ledc_channel_config(&step_ledc_chan);
-
-    led.begin();
-    led.clear();
-    led.show();
-
-    Serial.begin(115200);
-    TMCSerial.begin(115200, SERIAL_8N1, TMC_UART_RX, TMC_UART_TX);
-
-    driver.begin();
-    driver.toff(3);
-    driver.microsteps(MICROSTEPPING);
-    driver.en_spreadCycle(false);
-    driver.pwm_autoscale(true);
-    driver.pwm_autograd(true);
-    driver.SGTHRS(40); 
-    driver.semin(0);
-    driver.TCOOLTHRS(0xFFFFF);
-    uint16_t cool = driver.COOLCONF();
-    driver.COOLCONF(cool | (1 << 13));
-
-    prefs.begin("respooler", true);
-    wifiSSID = prefs.getString("ssid", "");
-    wifiPassword = prefs.getString("pwd", "");
-    prefs.end();
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true);
-
-    if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
-        WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
-    }
-    bleNotifyMutex = xSemaphoreCreateMutex();
-    loadSettings();
-    setMotorCurrent(motorStrength);
-    pwmValue = calculatePWM(ledBrightness);
-
-    NimBLEDevice::init(BOARD_NAME);
-    NimBLEDevice::setPower(ESP_PWR_LVL_P6);
-    NimBLEDevice::setMTU(512);
-    NimBLEServer* pServer = NimBLEDevice::createServer();
-    pServer->setCallbacks(new MyServerCallbacks());
-
-    NimBLEService* pService = pServer->createService(SERVICE_UUID);
-    pCharacteristic = pService->createCharacteristic(
-        CHARACTERISTIC_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
-    );
-    pCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
-    pService->start();
-
-    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    NimBLEAdvertisementData advData;
-    advData.setName(BOARD_NAME);
-    advData.addServiceUUID(SERVICE_UUID);
-    pAdvertising->setAdvertisementData(advData);
-    pAdvertising->start();
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL, 0);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL);
-    setConnLed(150);
-    currentState = 'I';
-}
-
-// ------------------- Main loop -----------------------------------
-void loop() {
-    unsigned long now = millis();
-
-    // ------------------ Wi-Fi connect async check -----------------
-    if (wifiConnectInProgress) {
-        if (WiFi.status() == WL_CONNECTED) {
-            wifiConnectInProgress = false;
-            if (deviceConnected && pCharacteristic) {
-                StaticJsonDocument<64> doc;
-                doc["WIFI_CONN_RESULT"] = true;
-                String jsonOut;
-                serializeJson(doc, jsonOut);
-                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-                pCharacteristic->setValue(jsonOut.c_str());
-                pCharacteristic->notify();
-                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-            }
-            prefs.begin("respooler", false);
-            prefs.putString("ssid", wifiSSID);
-            prefs.putString("pwd", wifiPassword);
-            prefs.end();
-        } else if (millis() - wifiConnectStartTime > 10000) {
-            wifiConnectInProgress = false;
-            if (deviceConnected && pCharacteristic) {
-                StaticJsonDocument<64> doc;
-                doc["WIFI_CONN_RESULT"] = false;
-                String jsonOut;
-                serializeJson(doc, jsonOut);
-                if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-                pCharacteristic->setValue(jsonOut.c_str());
-                pCharacteristic->notify();
-                if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-            }
-        }
-    }
-
-    // ------------------ Filament sensor -----------------
-    bool rawFilamentPresent = digitalRead(FILAMENT_PIN) == LOW;
-    if (rawFilamentPresent) {
-        filamentLostSince = 0;
-        filamentDetected = true;
-    } else {
-        if (filamentLostSince == 0) {
-            filamentLostSince = now;
-        }
-        if (filamentDetected && (now - filamentLostSince >= FILAMENT_LOSS_CONFIRM_MS)) {
-            filamentDetected = false;
-        }
-    }
-
-    if (useFilamentSensor && (currentState == 'P' || currentState == 'A') && !filamentDetected) {
-        isMotorRunning = false;
-        shouldStartMotorNow = false;
-        pendingDirectionChange = false;
-        triggerJingleNow = 0;
+  if (doc.containsKey("CMD")) {
+    String command = doc["CMD"].as<String>();
+    if (command == "START") {
+      if (!isMotorRunning) {
+        shouldStartMotorNow = true;
+        delayStartUntil = millis();
+      }
+    } else if (command == "STOP") {
+      if (otaInProgress) {
+        return;
+      }
+      if (currentState == 'A') {
         remHoldActive = true;
         remHoldExpiry = millis() + 200;
         progHoldActive = true;
         progHoldExpiry = millis() + 200;
+        isMotorRunning = false;
+        shouldStartMotorNow = false;
+        pendingDirectionChange = false;
+        triggerJingleNow = 0;
+        progress = 0.0;
+        totalEstimatedTime = 0;
+        spoolingStartTime = 0;
+        pausedElapsed = 0;
+        filamentLostSince = 0;
+        stepperStop();
+        ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
+        gpio_reset_pin((gpio_num_t)STEP_PIN);
+        gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
+        digitalWrite(STEP_PIN, LOW);
+        digitalWrite(EN_PIN, HIGH);
+        {
+          ledc_channel_config_t step_ledc_chan = {
+            .gpio_num = STEP_PIN,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel = STEP_LEDC_CHANNEL,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = STEP_LEDC_TIMER,
+            .duty = 0,
+            .hpoint = 0
+          };
+          ledc_channel_config(&step_ledc_chan);
+        }
+        currentState = 'I';
+        sendStatus(true);
+      } else {
+        remHoldActive = true;
+        remHoldExpiry = millis() + 200;
+        progHoldActive = true;
+        progHoldExpiry = millis() + 200;
+        isMotorRunning = false;
         progress = 0.0;
         totalEstimatedTime = 0;
         spoolingStartTime = 0;
@@ -1086,409 +765,1088 @@ void loop() {
         digitalWrite(STEP_PIN, LOW);
         currentState = 'I';
         sendStatus(true);
-    }
-
-    // ------------------ Motor/LED state -----------------
-    if (!otaInProgress) {
-        if (isMotorRunning) {
-            if (now - lastLedPulseTime > 5) {
-                lastLedPulseTime = now;
-                ledPulseValue += ledPulseDirection * 1;
-                if (ledPulseValue >= 255) {
-                    ledPulseValue = 255;
-                    ledPulseDirection = -1;
-                } else if (ledPulseValue <= 0) {
-                    ledPulseValue = 0;
-                    ledPulseDirection = 1;
-                }
-                uint16_t scaled16 = (uint16_t)ledPulseValue * (uint16_t)pwmValue;
-                uint8_t baseVal = scaled16 / 255;
-                uint8_t remainder = scaled16 % 255;
-                greenDitherAcc = (uint16_t)(greenDitherAcc + remainder);
-                if (greenDitherAcc >= 255) {
-                    baseVal++;
-                    greenDitherAcc -= 255;
-                }
-
-                led.setPixelColor(0, led.Color(0, baseVal, 0));
-                led.show();
-            }
-        } else if (currentState == 'P') {
-            if (now - lastLedPulseTime > 5) {
-                lastLedPulseTime = now;
-                ledPulseValue += ledPulseDirection * 1;
-                if (ledPulseValue >= 255) {
-                    ledPulseValue = 255;
-                    ledPulseDirection = -1;
-                } else if (ledPulseValue <= 0) {
-                    ledPulseValue = 0;
-                    ledPulseDirection = 1;
-                }
-                uint16_t scaled16 = (uint16_t)ledPulseValue * (uint16_t)pwmValue;
-                uint8_t baseVal = scaled16 / 255;
-                uint8_t remainder = scaled16 % 255;
-                greenDitherAcc = (uint16_t)(greenDitherAcc + remainder);
-                if (greenDitherAcc >= 255) {
-                    baseVal++;
-                    greenDitherAcc -= 255;
-                }
-                led.setPixelColor(0, led.Color(baseVal, baseVal/2, 0));
-                led.show();
-            }
-        } else if (currentState == 'A') {
-            if (millis() - lastLedToggle > 400) {
-                lastLedToggle = now;
-                ledState = !ledState;
-                led.setPixelColor(0, ledState ? led.Color(pwmValue, 0, 0) : 0);
-                led.show();
-            }
-        } else if (useFilamentSensor && filamentDetected) {
-            led.setPixelColor(0, led.Color(0, pwmValue, 0));
-            led.show();
-        } else {
-            led.setPixelColor(0, led.Color(0, 0, pwmValue));
-            led.show();
-        }
-    }
-
-    // ----------------- Torque Auto-Stop -----------------
-    static unsigned long lastTorqueCheck = 0;
-    static unsigned long torqueBelowStartTime = 0;
-    if (torqueLimit > 0 && isMotorRunning && stepIntervalMicros == targetStepIntervalMicros) {
-        if (now - lastTorqueCheck >= TORQUE_CHECK_INTERVAL_MS) {
-            lastTorqueCheck = now;
-            uint16_t sg = driver.SG_RESULT();
-            if (sg > TORQUE_SG_IGNORE) {
-
-                float strengthScale = 1.0;
-                int baseLimit = 350 * strengthScale;
-                int limit = 999;
-                if (torqueLimit == 1) limit = baseLimit * TORQUE_SG_LIMIT_LOW;
-                else if (torqueLimit == 2) limit = baseLimit * TORQUE_SG_LIMIT_MED;
-                else if (torqueLimit == 3) limit = baseLimit * TORQUE_SG_LIMIT_HIGH;
-
-                int currSpeedPercent = getSpeedPercentFromInterval(stepIntervalMicros);
-                if (currSpeedPercent > 94) {
-                    limit = limit * 0.95;
-                } else if (currSpeedPercent > 85) {
-                    limit = limit * 0.97;
-                } else if (currSpeedPercent < 65) {
-                    limit = limit * 0.98;
-                }
-
-                if (sg < limit) {
-                    if (torqueBelowStartTime == 0) torqueBelowStartTime = now;
-                    else if (now - torqueBelowStartTime >= TORQUE_BELOW_MS) {
-                        isMotorRunning = false;
-                        currentState = 'A';
-                        sendStatus(true);
-                        digitalWrite(STEP_PIN, LOW);
-                        delay(100);
-                        digitalWrite(EN_PIN, HIGH);
-                        unsigned long elapsed = millis() - spoolingStartTime;
-                        spoolingStartTime = 0;
-                        pausedElapsed = elapsed;
-                        torqueBelowStartTime = 0;
-                        stepperStop();
-                        ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
-                        gpio_reset_pin((gpio_num_t)STEP_PIN);
-                        gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
-                        digitalWrite(EN_PIN, LOW);
-                        digitalWrite(STEP_PIN, LOW);
-                        delay(120);
-                        {
-                            led.setPixelColor(0, led.Color(pwmValue, 0, 0));
-                            led.show();
-                        }
-                        for (int i = 0; i < 3; i++) { playTone(850, 250); delay(100); }
-                        digitalWrite(EN_PIN, HIGH);
-                        {
-                            ledc_channel_config_t step_ledc_chan = {
-                                .gpio_num       = STEP_PIN,
-                                .speed_mode     = LEDC_LOW_SPEED_MODE,
-                                .channel        = STEP_LEDC_CHANNEL,
-                                .intr_type      = LEDC_INTR_DISABLE,
-                                .timer_sel      = STEP_LEDC_TIMER,
-                                .duty           = 0,
-                                .hpoint         = 0
-                            };
-                            ledc_channel_config(&step_ledc_chan);
-                        }
-                        stepperStop();
-                    }
-                } else { torqueBelowStartTime = 0; }
-            }
-        }
-    } else { torqueBelowStartTime = 0; }
-
-    static unsigned long wgtFinishStart = 0;
-    if (isMotorRunning && targetWeight >= 1 && targetWeight <= 3 && totalEstimatedTime > 0) {
-        unsigned long elapsed = 0;
-        if (spoolingStartTime > 0) elapsed = now - spoolingStartTime;
-        else if (pausedElapsed > 0) elapsed = pausedElapsed;
-        else if (currentState == 'A') elapsed = pausedElapsed;
-
-        unsigned long effectiveTotal = totalEstimatedTime;
-        if (targetWeight == 2) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_2);
-        else if (targetWeight == 3) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_3);
-
-        if (effectiveTotal == 0) {
-            wgtFinishStart = 0;
-        } else if (elapsed >= effectiveTotal) {
-            if (!(useFilamentSensor && !filamentDetected)) {
-                if (wgtFinishStart == 0) wgtFinishStart = now;
-                if (now - wgtFinishStart >= 700) {
-                    isMotorRunning = false;
-                    digitalWrite(STEP_PIN, LOW);
-                    stepperStop();
-                    digitalWrite(EN_PIN, HIGH);
-                    totalEstimatedTime = 0;
-                    spoolingStartTime = 0;
-                    currentState = 'D';
-                    sendStatus(true);
-                    progress = 100.0f;
-                    sendStatus(true);
-                    doneHoldActive = true;
-                    doneHoldStart = millis();
-                    playStepperJingle();
-                    wgtFinishStart = 0;
-                }
-            } else {
-                wgtFinishStart = 0;
-            }
-        } else {
-            wgtFinishStart = 0;
-        }
-    }
-
-    // ------------------ Respooler done -------------------
-    if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > FILAMENT_LOSS_CONFIRM_MS) {
+      }
+    } else if (command == "PAUSE") {
+      if (isMotorRunning) {
         isMotorRunning = false;
-        digitalWrite(STEP_PIN, LOW);
         stepperStop();
-        delay(40);
         digitalWrite(EN_PIN, HIGH);
-        totalEstimatedTime = 0;
-        spoolingStartTime = 0;
-        currentState = 'D';
-        sendStatus(true);
-        progress = 100.0f;
-        sendStatus(true);
-        doneHoldActive = true;
-        doneHoldStart = millis();
-        delay(300);
-        playStepperJingle();
-    }
-    if (doneHoldActive && (millis() - doneHoldStart >= 20000)) {
-        progress = 0.0;
-        currentState = 'I';
-        sendStatus(true);
-        doneHoldActive = false;
-    }
-
-    // ------- Direction change after stop -----------
-    if (pendingDirectionChange && !isMotorRunning) {
-        motorDirection = newMotorDirection;
-        prefs.begin("respooler", false);
-        prefs.putUInt("dir", motorDirection);
-        prefs.end();
-        digitalWrite(DIR_PIN, motorDirection);
-        delayStartUntil = now + 1000;
-        shouldStartMotorNow = true;
-        pendingDirectionChange = false;
-    }
-
-    // ------------ Motor start logic ----------------
-    if (shouldStartMotorNow && now >= delayStartUntil) {
-        if (otaInProgress) {
-            shouldStartMotorNow = false;
-            return;
+        digitalWrite(STEP_PIN, LOW);
+        unsigned long elapsed = 0;
+        if (spoolingStartTime > 0) {
+          elapsed = millis() - spoolingStartTime;
         }
-        if (isMotorRunning) { shouldStartMotorNow = false; }
-        else if (!useFilamentSensor || filamentDetected) {
-            int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)targetStepIntervalMicros));
-            currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-            totalEstimatedTime = calibrationAt80Speed * (80.0 / currSpeedPercent);
-            if (pausedElapsed > 0) {
-                spoolingStartTime = millis() - pausedElapsed; pausedElapsed = 0;
-            } else {
-                spoolingStartTime = millis();
-            }
-            currentState = 'R';
+        pausedElapsed = elapsed;
+        spoolingStartTime = 0;
+        currentState = 'P';
+        sendStatus(true);
+      }
+    } else if (command == "WIFI_SCAN") {
+      if (wifiScanTaskHandle == nullptr) {
+        xTaskCreate(wifiScanTask, "WiFiScan", 4096, NULL, 1, &wifiScanTaskHandle);
+      }
+    } else if (command == "OTA") {
+      if (!otaInProgress) {
+        sendOTAUpdate();
+      }
+    } else if (command == "WIFI_CONNECT") {
+      if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
+        WiFi.disconnect(true);
+        WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+        wifiConnectInProgress = true;
+        wifiConnectStartTime = millis();
+      }
+    }
+  }
+  if (doc.containsKey("SET")) {
+    JsonObject set = doc["SET"].as<JsonObject>();
+    bool changed = false;
+    bool servoEndpointsChanged = false;
+    if (set.containsKey("VAR")) {
+      JsonVariant vj = set["VAR"];
+      uint8_t newVar = boardVariant;
+      if (vj.is<const char*>()) {
+        const char* s = vj.as<const char*>();
+        if (s && s[0]) {
+          String up = String(s);
+          up.toUpperCase();
+          if (up == "PRO") newVar = 2;
+          else if (up == "STD" || up == "STANDARD") newVar = 1;
+          else if (up == "UNK" || up == "UNKNOWN") newVar = 0;
+        }
+      } else {
+        int vi = vj.as<int>();
+        if (vi < 0) vi = 0;
+        if (vi > 2) vi = 2;
+        newVar = (uint8_t)vi;
+      }
+      if (newVar != boardVariant) {
+        boardVariant = newVar;
+        changed = true;
+      }
+    }
+    if (set.containsKey("DIR")) {
+      int dir = set["DIR"];
+      if (dir != motorDirection) {
+        if (isMotorRunning) {
+          pendingDirectionChange = true;
+          newMotorDirection = dir;
+          isMotorRunning = false;
+          stepperStop();
+          digitalWrite(EN_PIN, HIGH);
+          digitalWrite(STEP_PIN, LOW);
+        } else {
+          motorDirection = dir;
+          digitalWrite(DIR_PIN, motorDirection);
+          prefs.begin("respooler", false);
+          prefs.putUInt("dir", motorDirection);
+          prefs.end();
+        }
+        changed = true;
+      }
+    }
+    if (set.containsKey("LED")) {
+      ledBrightness = constrain((int)set["LED"], 0, 100);
+      pwmValue = calculatePWM(ledBrightness);
+      prefs.begin("respooler", false);
+      prefs.putUInt("led", ledBrightness);
+      prefs.end();
+      changed = true;
+    }
+    if (set.containsKey("USE_FIL")) {
+      useFilamentSensor = (int)set["USE_FIL"] != 0;
+      prefs.begin("respooler", false);
+      prefs.putBool("filamentSensor", useFilamentSensor);
+      prefs.end();
+      changed = true;
+    }
+    if (set.containsKey("POW")) {
+      motorStrength = constrain((int)set["POW"], 80, 120);
+      setMotorCurrent(motorStrength);
+      prefs.begin("respooler", false);
+      prefs.putUInt("motorStrength", motorStrength);
+      prefs.end();
+      changed = true;
+    }
+    if (set.containsKey("TRQ")) {
+      int newTrq = constrain((int)set["TRQ"], 0, 3);
+      if (highSpeedMode) {
+        savedTorqueLimitHS = newTrq;
+        prefs.begin("respooler", false);
+        prefs.putUInt("torqueLimit", savedTorqueLimitHS);
+        prefs.end();
+        torqueLimit = 0;
+      } else {
+        torqueLimit = newTrq;
+        prefs.begin("respooler", false);
+        prefs.putUInt("torqueLimit", torqueLimit);
+        prefs.end();
+      }
+      changed = true;
+    }
+    if (set.containsKey("JIN")) {
+      int newJingleStyle = constrain((int)set["JIN"], 0, 3);
+      if (newJingleStyle != jingleStyle) {
+        jingleStyle = newJingleStyle;
+        prefs.begin("respooler", false);
+        prefs.putUInt("jingle", jingleStyle);
+        prefs.end();
+        if (!isMotorRunning) triggerJingleNow = jingleStyle;
+        changed = true;
+      }
+    }
+    if (set.containsKey("DUR")) {
+      unsigned long dur = (unsigned long)set["DUR"];
+      if (dur >= 10 && dur <= 20000) {
+        calibrationAt80Speed = dur * 1000UL;
+        prefs.begin("respooler", false);
+        prefs.putULong("cal80_093", calibrationAt80Speed);
+        prefs.end();
+        changed = true;
+      }
+    }
+    if (set.containsKey("WGT")) {
+      int newWgt = constrain((int)set["WGT"], 0, 3);
+      targetWeight = newWgt;
+      prefs.begin("respooler", false);
+      prefs.putUInt("targetWeight", (unsigned int)targetWeight);
+      prefs.end();
+      changed = true;
+    }
+    if (set.containsKey("SPD")) {
+      int speed = constrain((int)set["SPD"], 50, 100);
+      double span = 170.0 - 93.0;
+      double baseInterval = 170.0 - ((double)(speed - 50) * span / 50.0);
+      baseTargetStepIntervalMicros = (unsigned long)lround(baseInterval);
+      speedPercent = speed;
+      prefs.begin("respooler", false);
+      prefs.putUInt("speed", baseTargetStepIntervalMicros);
+      prefs.end();
+      applySpeedTarget();
+      changed = true;
+    }
+    if (set.containsKey("HS")) {
+      bool newHS = (int)set["HS"] != 0;
+      if (newHS != highSpeedMode) {
+        if (newHS) {
+          highSpeedMode = true;
+          savedTorqueLimitHS = torqueLimit;
+          torqueLimit = 0;
+          applySpeedTarget();
+          prefs.begin("respooler", false);
+          prefs.putBool("hsMode", true);
+          prefs.end();
+        } else {
+          highSpeedMode = false;
+          torqueLimit = savedTorqueLimitHS;
+          applySpeedTarget();
+          prefs.begin("respooler", false);
+          prefs.putBool("hsMode", false);
+          prefs.putUInt("torqueLimit", torqueLimit);
+          prefs.end();
+        }
+        changed = true;
+      }
+    }
+    if (set.containsKey("FAN_SPD")) {
+      fanSpeed = constrain((int)set["FAN_SPD"], 0, 100);
+      prefs.begin("respooler", false);
+      prefs.putUInt("fanSpeed", fanSpeed);
+      prefs.end();
+      changed = true;
+    }
+    if (set.containsKey("FAN_ALW")) {
+      fanAlwaysOn = (int)set["FAN_ALW"] != 0;
+      prefs.begin("respooler", false);
+      prefs.putBool("fanAlways", fanAlwaysOn);
+      prefs.end();
+      changed = true;
+    }
+
+    if (set.containsKey("SV_R")) {
+      int r = constrain((int)set["SV_R"], 0, 180);
+      if (r != servoAngleR) {
+        servoAngleR = r;
+        prefs.begin("respooler", false);
+        prefs.putUInt("servoR", (unsigned int)servoAngleR);
+        prefs.end();
+        servoEndpointsChanged = true;
+        changed = true;
+      }
+      if (!isMotorRunning && (currentState == 'I' || currentState == 'D') && servoGotoSide == 'R') {
+        servoGotoActive = true;
+        servoHomingToHome = false;
+        lastServoHomeStepTime = millis();
+      }
+    }
+    if (set.containsKey("SV_L")) {
+      int l = constrain((int)set["SV_L"], 0, 180);
+      if (l != servoAngleL) {
+        servoAngleL = l;
+        prefs.begin("respooler", false);
+        prefs.putUInt("servoL", (unsigned int)servoAngleL);
+        prefs.end();
+        servoEndpointsChanged = true;
+        changed = true;
+      }
+      if (!isMotorRunning && (currentState == 'I' || currentState == 'D') && servoGotoSide == 'L') {
+        servoGotoActive = true;
+        servoHomingToHome = false;
+        lastServoHomeStepTime = millis();
+      }
+    }
+    if (set.containsKey("SV_STP")) {
+      float s = (float)set["SV_STP"].as<float>();
+      s = constrain(s, 0.05f, 20.0f);
+      if (fabsf(s - servoStepMm) > 0.0001f) {
+        servoStepMm = s;
+        prefs.begin("respooler", false);
+        prefs.putFloat("servoStep", servoStepMm);
+        prefs.end();
+        changed = true;
+      }
+    }
+    if (set.containsKey("SV_HOME")) {
+      const char* v = set["SV_HOME"].as<const char*>();
+      char c = (v && v[0]) ? v[0] : 0;
+      if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+      if (c == 'R' || c == 'L') {
+        bool homeR = (c == 'R');
+        if (homeR != servoHomeIsR) {
+          servoHomeIsR = homeR;
+          prefs.begin("respooler", false);
+          prefs.putBool("servoHomeR", servoHomeIsR);
+          prefs.end();
+          servoEndpointsChanged = true;
+          changed = true;
+        }
+      }
+    }
+    if (set.containsKey("SV_GOTO") && !isMotorRunning && (currentState == 'I' || currentState == 'D')) {
+      const char* v = set["SV_GOTO"].as<const char*>();
+      char c = (v && v[0]) ? v[0] : 0;
+      if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+
+      if (c == 'L' || c == 'R' || c == 'H') {
+        servoGotoSide = c;
+        servoGotoActive = true;
+        servoHomingToHome = false;
+        lastServoHomeStepTime = millis();
+      }
+    }
+    if (servoEndpointsChanged && !isMotorRunning && (currentState == 'I' || currentState == 'D') && !servoGotoActive && !(servoGotoSide == 'L' || servoGotoSide == 'R')) {
+      guideServoTowardsL = servoHomeIsR;
+      servoHomingToHome = true;
+      lastServoHomeStepTime = millis();
+    }
+    if (set.containsKey("WIFI_SSID")) {
+      wifiSSID = set["WIFI_SSID"].as<String>();
+      changed = true;
+    }
+    if (set.containsKey("WIFI_PASS")) {
+      wifiPassword = set["WIFI_PASS"].as<String>();
+      changed = true;
+    }
+    if (changed) {
+      prefs.begin("respooler", false);
+      prefs.putString("ssid", wifiSSID);
+      prefs.putString("pwd", wifiPassword);
+      prefs.putUChar("variant", boardVariant);
+      prefs.end();
+      sendStatus(true);
+    }
+  }
+}
+
+// ------------------- BLE callback classes ------------------------
+class MyServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo&) override {
+    deviceConnected = true;
+    if (pServer->getConnectedCount() < 2) {
+      NimBLEDevice::startAdvertising();
+    }
+    xTaskCreate([](void*) {
+      delay(1100);
+      sendStatus(true);
+      vTaskDelete(NULL);
+    },
+                "delayedSend", 2048, NULL, 1, NULL);
+  }
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo&, int) override {
+    deviceConnected = pServer->getConnectedCount() > 0;
+    if (pServer->getConnectedCount() < 2) {
+      NimBLEDevice::startAdvertising();
+    }
+  }
+};
+class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo&) override {
+    std::string rx = pChar->getValue();
+    if (!rx.empty()) handleCommand(rx);
+  }
+};
+
+// -------------------------- Setup --------------------------------
+void setup() {
+  esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+  esp_coex_preference_set(ESP_COEX_PREFER_BT);
+  pinMode(FILAMENT_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(STEP_PIN, OUTPUT);
+  pinMode(DIR_PIN, OUTPUT);
+  pinMode(EN_PIN, OUTPUT);
+  digitalWrite(EN_PIN, HIGH);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(LED_CONN_PIN, OUTPUT);
+  pinMode(FAN_PIN, OUTPUT);
+
+  ledc_timer_config_t servo_timer = {
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .duty_resolution = LEDC_TIMER_14_BIT,
+    .timer_num = SERVO_LEDC_TIMER,
+    .freq_hz = 50,
+    .clk_cfg = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&servo_timer);
+
+  ledc_channel_config_t servo_channel = {
+    .gpio_num = SERVO_PIN,
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .channel = SERVO_LEDC_CHANNEL,
+    .intr_type = LEDC_INTR_DISABLE,
+    .timer_sel = SERVO_LEDC_TIMER,
+    .duty = 0,
+    .hpoint = 0
+  };
+  ledc_channel_config(&servo_channel);
+
+  ledc_timer_config_t timer_conf = {
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .duty_resolution = LEDC_TIMER_8_BIT,
+    .timer_num = FAN_TIMER,
+    .freq_hz = 35000,
+    .clk_cfg = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&timer_conf);
+
+  ledc_channel_config_t channel_conf = {
+    .gpio_num = FAN_PIN,
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .channel = FAN_CHANNEL,
+    .intr_type = LEDC_INTR_DISABLE,
+    .timer_sel = FAN_TIMER,
+    .duty = 0,
+    .hpoint = 0
+  };
+  ledc_channel_config(&channel_conf);
+
+  ledc_timer_config_t conn_led_timer = {
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .duty_resolution = LEDC_TIMER_8_BIT,
+    .timer_num = LEDC_TIMER_0,
+    .freq_hz = 1000,
+    .clk_cfg = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&conn_led_timer);
+
+  ledc_channel_config_t conn_led_conf = {
+    .gpio_num = LED_CONN_PIN,
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .channel = LEDC_CHANNEL_2,
+    .intr_type = LEDC_INTR_DISABLE,
+    .timer_sel = LEDC_TIMER_0,
+    .duty = 0,
+    .hpoint = 0
+  };
+  ledc_channel_config(&conn_led_conf);
+
+  ledc_timer_config_t step_ledc_timer = {
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .duty_resolution = LEDC_TIMER_10_BIT,
+    .timer_num = STEP_LEDC_TIMER,
+    .freq_hz = 1000,
+    .clk_cfg = LEDC_AUTO_CLK
+  };
+  ledc_timer_config(&step_ledc_timer);
+
+  ledc_channel_config_t step_ledc_chan = {
+    .gpio_num = STEP_PIN,
+    .speed_mode = LEDC_LOW_SPEED_MODE,
+    .channel = STEP_LEDC_CHANNEL,
+    .intr_type = LEDC_INTR_DISABLE,
+    .timer_sel = STEP_LEDC_TIMER,
+    .duty = 0,
+    .hpoint = 0
+  };
+  ledc_channel_config(&step_ledc_chan);
+
+  led.begin();
+  led.clear();
+  led.show();
+
+  Serial.begin(115200);
+  TMCSerial.begin(115200, SERIAL_8N1, TMC_UART_RX, TMC_UART_TX);
+
+  driver.begin();
+  driver.toff(3);
+  driver.microsteps(MICROSTEPPING);
+  driver.en_spreadCycle(false);
+  driver.pwm_autoscale(true);
+  driver.pwm_autograd(true);
+  driver.SGTHRS(40);
+  driver.semin(0);
+  driver.TCOOLTHRS(0xFFFFF);
+  uint16_t cool = driver.COOLCONF();
+  driver.COOLCONF(cool | (1 << 13));
+
+  prefs.begin("respooler", true);
+  wifiSSID = prefs.getString("ssid", "");
+  wifiPassword = prefs.getString("pwd", "");
+  prefs.end();
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+
+  if (wifiSSID.length() > 0 && wifiPassword.length() > 0) {
+    WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+  }
+  bleNotifyMutex = xSemaphoreCreateMutex();
+  loadSettings();
+  setMotorCurrent(motorStrength);
+  pwmValue = calculatePWM(ledBrightness);
+
+  guideServoPos = (float)(servoHomeIsR ? servoAngleR : servoAngleL);
+  guideServoTowardsL = servoHomeIsR;
+  setServoAngle((int)lroundf(guideServoPos));
+
+  NimBLEDevice::init(BOARD_NAME);
+  NimBLEDevice::setPower(ESP_PWR_LVL_P6);
+  NimBLEDevice::setMTU(512);
+  NimBLEServer* pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  NimBLEService* pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY);
+  pCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
+  pService->start();
+
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  NimBLEAdvertisementData advData;
+  advData.setName(BOARD_NAME);
+  advData.addServiceUUID(SERVICE_UUID);
+
+  std::string manufacturerData;
+  if (boardVariant == 2) {
+    manufacturerData = "\xFF\xFF\x02";
+  } else {
+    manufacturerData = "\xFF\xFF\x01";
+  }
+  advData.setManufacturerData(manufacturerData);
+
+  pAdvertising->setAdvertisementData(advData);
+  pAdvertising->start();
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL, 0);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL);
+  setConnLed(150);
+  currentState = 'I';
+}
+
+// ------------------- Main loop -----------------------------------
+void loop() {
+  unsigned long now = millis();
+  pollSerialCommands();
+
+  // ------------------ Wi-Fi connect async check -----------------
+  if (wifiConnectInProgress) {
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiConnectInProgress = false;
+      if (deviceConnected && pCharacteristic) {
+        StaticJsonDocument<64> doc;
+        doc["WIFI_CONN_RESULT"] = true;
+        String jsonOut;
+        serializeJson(doc, jsonOut);
+        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+        pCharacteristic->setValue(jsonOut.c_str());
+        pCharacteristic->notify();
+        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+      }
+      prefs.begin("respooler", false);
+      prefs.putString("ssid", wifiSSID);
+      prefs.putString("pwd", wifiPassword);
+      prefs.end();
+    } else if (millis() - wifiConnectStartTime > 10000) {
+      wifiConnectInProgress = false;
+      if (deviceConnected && pCharacteristic) {
+        StaticJsonDocument<64> doc;
+        doc["WIFI_CONN_RESULT"] = false;
+        String jsonOut;
+        serializeJson(doc, jsonOut);
+        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
+        pCharacteristic->setValue(jsonOut.c_str());
+        pCharacteristic->notify();
+        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+      }
+    }
+  }
+
+  // ------------------ Filament sensor -----------------
+  bool rawFilamentPresent = digitalRead(FILAMENT_PIN) == LOW;
+  if (rawFilamentPresent) {
+    filamentLostSince = 0;
+    filamentDetected = true;
+  } else {
+    if (filamentLostSince == 0) {
+      filamentLostSince = now;
+    }
+    if (filamentDetected && (now - filamentLostSince >= FILAMENT_LOSS_CONFIRM_MS)) {
+      filamentDetected = false;
+    }
+  }
+
+  if (useFilamentSensor && (currentState == 'P' || currentState == 'A') && !filamentDetected) {
+    isMotorRunning = false;
+    shouldStartMotorNow = false;
+    pendingDirectionChange = false;
+    triggerJingleNow = 0;
+    remHoldActive = true;
+    remHoldExpiry = millis() + 200;
+    progHoldActive = true;
+    progHoldExpiry = millis() + 200;
+    progress = 0.0;
+    totalEstimatedTime = 0;
+    spoolingStartTime = 0;
+    pausedElapsed = 0;
+    stepperStop();
+    digitalWrite(EN_PIN, HIGH);
+    digitalWrite(STEP_PIN, LOW);
+    currentState = 'I';
+    sendStatus(true);
+  }
+
+  // ------------------ Motor/LED state -----------------
+  if (!otaInProgress) {
+    if (isMotorRunning) {
+      if (now - lastLedPulseTime > 5) {
+        lastLedPulseTime = now;
+        ledPulseValue += ledPulseDirection * 1;
+        if (ledPulseValue >= 255) {
+          ledPulseValue = 255;
+          ledPulseDirection = -1;
+        } else if (ledPulseValue <= 0) {
+          ledPulseValue = 0;
+          ledPulseDirection = 1;
+        }
+        uint16_t scaled16 = (uint16_t)ledPulseValue * (uint16_t)pwmValue;
+        uint8_t baseVal = scaled16 / 255;
+        uint8_t remainder = scaled16 % 255;
+        greenDitherAcc = (uint16_t)(greenDitherAcc + remainder);
+        if (greenDitherAcc >= 255) {
+          baseVal++;
+          greenDitherAcc -= 255;
+        }
+
+        led.setPixelColor(0, led.Color(0, baseVal, 0));
+        led.show();
+      }
+    } else if (currentState == 'P') {
+      if (now - lastLedPulseTime > 5) {
+        lastLedPulseTime = now;
+        ledPulseValue += ledPulseDirection * 1;
+        if (ledPulseValue >= 255) {
+          ledPulseValue = 255;
+          ledPulseDirection = -1;
+        } else if (ledPulseValue <= 0) {
+          ledPulseValue = 0;
+          ledPulseDirection = 1;
+        }
+        uint16_t scaled16 = (uint16_t)ledPulseValue * (uint16_t)pwmValue;
+        uint8_t baseVal = scaled16 / 255;
+        uint8_t remainder = scaled16 % 255;
+        greenDitherAcc = (uint16_t)(greenDitherAcc + remainder);
+        if (greenDitherAcc >= 255) {
+          baseVal++;
+          greenDitherAcc -= 255;
+        }
+        led.setPixelColor(0, led.Color(baseVal, baseVal / 2, 0));
+        led.show();
+      }
+    } else if (currentState == 'A') {
+      if (millis() - lastLedToggle > 400) {
+        lastLedToggle = now;
+        ledState = !ledState;
+        led.setPixelColor(0, ledState ? led.Color(pwmValue, 0, 0) : 0);
+        led.show();
+      }
+    } else if (useFilamentSensor && filamentDetected) {
+      led.setPixelColor(0, led.Color(0, pwmValue, 0));
+      led.show();
+    } else {
+      led.setPixelColor(0, led.Color(0, 0, pwmValue));
+      led.show();
+    }
+  }
+
+  // ----------------- Torque Auto-Stop -----------------
+  static unsigned long lastTorqueCheck = 0;
+  static unsigned long torqueBelowStartTime = 0;
+  if (torqueLimit > 0 && isMotorRunning && stepIntervalMicros == targetStepIntervalMicros) {
+    if (now - lastTorqueCheck >= TORQUE_CHECK_INTERVAL_MS) {
+      lastTorqueCheck = now;
+      uint16_t sg = driver.SG_RESULT();
+      if (sg > TORQUE_SG_IGNORE) {
+
+        float strengthScale = 1.0;
+        int baseLimit = 350 * strengthScale;
+        int limit = 999;
+        if (torqueLimit == 1) limit = baseLimit * TORQUE_SG_LIMIT_LOW;
+        else if (torqueLimit == 2) limit = baseLimit * TORQUE_SG_LIMIT_MED;
+        else if (torqueLimit == 3) limit = baseLimit * TORQUE_SG_LIMIT_HIGH;
+
+        int currSpeedPercent = getSpeedPercentFromInterval(stepIntervalMicros);
+        if (currSpeedPercent > 94) {
+          limit = limit * 0.95;
+        } else if (currSpeedPercent > 85) {
+          limit = limit * 0.97;
+        } else if (currSpeedPercent < 65) {
+          limit = limit * 0.98;
+        }
+
+        if (sg < limit) {
+          if (torqueBelowStartTime == 0) torqueBelowStartTime = now;
+          else if (now - torqueBelowStartTime >= TORQUE_BELOW_MS) {
+            isMotorRunning = false;
+            currentState = 'A';
             sendStatus(true);
-            remStartHoldUntil = millis() + 800;
-            doneHoldActive = false;
+            digitalWrite(STEP_PIN, LOW);
+            delay(100);
+            digitalWrite(EN_PIN, HIGH);
+            unsigned long elapsed = millis() - spoolingStartTime;
+            spoolingStartTime = 0;
+            pausedElapsed = elapsed;
+            torqueBelowStartTime = 0;
             stepperStop();
-            reSanitizeDriver();
-            digitalWrite(DIR_PIN, motorDirection);
+            ledc_stop(LEDC_LOW_SPEED_MODE, STEP_LEDC_CHANNEL, 0);
+            gpio_reset_pin((gpio_num_t)STEP_PIN);
+            gpio_set_direction((gpio_num_t)STEP_PIN, GPIO_MODE_OUTPUT);
             digitalWrite(EN_PIN, LOW);
             digitalWrite(STEP_PIN, LOW);
-            delay(15);
+            delay(120);
             {
-                uint16_t prevI = driver.rms_current();
-                driver.en_spreadCycle(true);
-                int boosted = prevI + prevI / 4;
-                if (boosted > 1600) boosted = 1600;
-                driver.rms_current(boosted);
-                stepperStart(stepFreqFromIntervalUs(1800));
-                delay(150);
-                driver.rms_current(prevI);
-                driver.en_spreadCycle(false);
+              led.setPixelColor(0, led.Color(pwmValue, 0, 0));
+              led.show();
             }
-            stepIntervalMicros = START_INTERVAL_US;
-            lastAccelUpdate = now;
-            isMotorRunning = true;
-            stepperStart(stepFreqFromIntervalUs(stepIntervalMicros));
-        }
-        shouldStartMotorNow = false;
-    }
-
-    // ------------ Button handling with debounce ------------
-    bool reading = digitalRead(BUTTON_PIN);
-    if (reading != lastStableButtonState && now - lastDebounceTime > BUTTON_DEBOUNCE_MS) {
-        lastDebounceTime = now;
-
-        if (reading == LOW) {
-            if (!isMotorRunning) {
-                if (currentState == 'P' || currentState == 'A') {
-                    buttonPressSince = now;
-                    buttonLongPressHandled = false;
-                    buttonAwaitingDecision = true;
-                } else if (useFilamentSensor && !filamentDetected) {
-                    if (!otaInProgress) {
-                        for (int i = 0; i < 5; i++) {
-                            led.setPixelColor(0, led.Color(0, 0, pwmValue)); led.show(); delay(100);
-                            led.setPixelColor(0, 0); led.show(); delay(100);
-                        }
-                    }
-                } else {
-                    shouldStartMotorNow = true; delayStartUntil = now;
-                }
-            } else {
-                isMotorRunning = false;
-                stepperStop();
-                digitalWrite(EN_PIN, HIGH);
-                digitalWrite(STEP_PIN, LOW);
-                unsigned long elapsed = 0;
-                if (spoolingStartTime > 0) {
-                    elapsed = millis() - spoolingStartTime;
-                }
-                pausedElapsed = elapsed;
-                spoolingStartTime = 0;
-                currentState = 'P';
-                sendStatus(true);
+            for (int i = 0; i < 3; i++) {
+              playTone(850, 250);
+              delay(100);
             }
-        } else {
-            if (buttonAwaitingDecision) {
-                if (!buttonLongPressHandled) {
-                    if (!(useFilamentSensor && !filamentDetected)) {
-                        shouldStartMotorNow = true; delayStartUntil = now;
-                    }
-                }
-                buttonAwaitingDecision = false;
-            }
-        }
-
-        lastStableButtonState = reading;
-    }
-    if (buttonAwaitingDecision && !buttonLongPressHandled && (digitalRead(BUTTON_PIN) == LOW)) {
-        if (now - buttonPressSince >= 1000) {
-            remHoldActive = true;
-            remHoldExpiry = millis() + 200;
-            progHoldActive = true;
-            progHoldExpiry = millis() + 200;
-            isMotorRunning = false;
-            progress = 0.0;
-            totalEstimatedTime = 0;
-            spoolingStartTime = 0;
-            pausedElapsed = 0;
-            stepperStop();
             digitalWrite(EN_PIN, HIGH);
-            digitalWrite(STEP_PIN, LOW);
-            currentState = 'I';
-            sendStatus(true);
-            buttonLongPressHandled = true;
-        }
-    }
-
-    // ----------- Motor acceleration (speed ramp) --------------
-    if (isMotorRunning && now - lastAccelUpdate > ACCEL_UPDATE_INTERVAL) {
-        lastAccelUpdate = now;
-        if (stepIntervalMicros > targetStepIntervalMicros) {
-            stepIntervalMicros -= ACCEL_STEP;
-            if (stepIntervalMicros < targetStepIntervalMicros) stepIntervalMicros = targetStepIntervalMicros;
-        } else if (stepIntervalMicros < targetStepIntervalMicros) {
-            stepIntervalMicros += ACCEL_STEP;
-            if (stepIntervalMicros > targetStepIntervalMicros) stepIntervalMicros = targetStepIntervalMicros;
-        }
-        if (stepIntervalMicros != lastIntervalMicros) {
-            stepperSetFreq(stepFreqFromIntervalUs(stepIntervalMicros));
-            lastIntervalMicros = stepIntervalMicros;
-        }
-        if (stepIntervalMicros == targetStepIntervalMicros) {
-            int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
-            currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-            unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
-            unsigned long elapsed = millis() - spoolingStartTime;
-            if (totalEstimatedTime > 0) {
-                float progressRatio = (float)elapsed / totalEstimatedTime;
-                spoolingStartTime = millis() - (newTotal * progressRatio);
+            {
+              ledc_channel_config_t step_ledc_chan = {
+                .gpio_num = STEP_PIN,
+                .speed_mode = LEDC_LOW_SPEED_MODE,
+                .channel = STEP_LEDC_CHANNEL,
+                .intr_type = LEDC_INTR_DISABLE,
+                .timer_sel = STEP_LEDC_TIMER,
+                .duty = 0,
+                .hpoint = 0
+              };
+              ledc_channel_config(&step_ledc_chan);
             }
-            totalEstimatedTime = newTotal;
-        }
-    }
-
-    // ------------- Connection LED animation ------------------
-    if (!otaInProgress) {
-        static int connLedPulse = 0;
-        static int connLedDir = 2;
-
-        if (!deviceConnected) {
-            if (now - lastConnLedTime > 25) {
-                lastConnLedTime = now;
-                connLedPulse += connLedDir;
-                if (connLedPulse >= LED_CONN_PULSE_MAX) {
-                    connLedPulse = LED_CONN_PULSE_MAX;
-                    connLedDir = -2;
-                } else if (connLedPulse <= 0) {
-                    connLedPulse = 0;
-                    connLedDir = 2;
-                }
-                setConnLed(connLedPulse);
-            }
+            stepperStop();
+          }
         } else {
-            ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
-            ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+          torqueBelowStartTime = 0;
         }
+      }
     }
+  } else {
+    torqueBelowStartTime = 0;
+  }
 
-    // ---------------------- Jingle trigger ---------------------
-    if (triggerJingleNow != 0) {
-        playStepperJingle();
-        triggerJingleNow = 0;
-    }
-    
-    // ----------- Restart BLE advertising if disconnected --------------
-    if (!deviceConnected && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-        NimBLEDevice::startAdvertising();
-    }
+  static unsigned long wgtFinishStart = 0;
+  if (isMotorRunning && targetWeight >= 1 && targetWeight <= 3 && totalEstimatedTime > 0) {
+    unsigned long elapsed = 0;
+    if (spoolingStartTime > 0) elapsed = now - spoolingStartTime;
+    else if (pausedElapsed > 0) elapsed = pausedElapsed;
+    else if (currentState == 'A') elapsed = pausedElapsed;
 
-    // ---------------- FAN control logic ----------------
-    int fanPWM = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter) ? fanPWMFromSpeed(fanSpeed) : 0;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL, fanPWM);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL);
-    if (!isMotorRunning && fanPWM > 0 && fanStopAfter == 0) {
-        fanStopAfter = millis() + 10000;
-    }
-    if (isMotorRunning) fanStopAfter = millis() + 10000;
-    if (!fanAlwaysOn && !isMotorRunning && millis() >= fanStopAfter) {
-        fanStopAfter = 0;
-    }
+    unsigned long effectiveTotal = totalEstimatedTime;
+    if (targetWeight == 2) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_2);
+    else if (targetWeight == 3) effectiveTotal = (unsigned long)(totalEstimatedTime * TARGET_WEIGHT_FACTOR_3);
 
-    // ----------- Periodic Status-Update every 500 ms -----------
-    static unsigned long lastStatusTime = 0;
-    if (millis() - lastStatusTime > 500) {
-        sendStatus();
-        lastStatusTime = millis();
+    if (effectiveTotal == 0) {
+      wgtFinishStart = 0;
+    } else if (elapsed >= effectiveTotal) {
+      if (!(useFilamentSensor && !filamentDetected)) {
+        if (wgtFinishStart == 0) wgtFinishStart = now;
+        if (now - wgtFinishStart >= 700) {
+          isMotorRunning = false;
+          digitalWrite(STEP_PIN, LOW);
+          stepperStop();
+          digitalWrite(EN_PIN, HIGH);
+          totalEstimatedTime = 0;
+          spoolingStartTime = 0;
+          currentState = 'D';
+          sendStatus(true);
+          progress = 100.0f;
+          sendStatus(true);
+          doneHoldActive = true;
+          doneHoldStart = millis();
+          playStepperJingle();
+          wgtFinishStart = 0;
+        }
+      } else {
+        wgtFinishStart = 0;
+      }
+    } else {
+      wgtFinishStart = 0;
     }
+  }
+
+
+  if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > FILAMENT_LOSS_CONFIRM_MS) {
+    isMotorRunning = false;
+    digitalWrite(STEP_PIN, LOW);
+    stepperStop();
+    delay(40);
+    digitalWrite(EN_PIN, HIGH);
+    totalEstimatedTime = 0;
+    spoolingStartTime = 0;
+    currentState = 'D';
+    sendStatus(true);
+    progress = 100.0f;
+    sendStatus(true);
+    doneHoldActive = true;
+    doneHoldStart = millis();
+    delay(300);
+    playStepperJingle();
+  }
+  if (doneHoldActive && (millis() - doneHoldStart >= 20000)) {
+    progress = 0.0;
+    currentState = 'I';
+    sendStatus(true);
+    doneHoldActive = false;
+  }
+
+  // ------- Direction change after stop -----------
+  if (pendingDirectionChange && !isMotorRunning) {
+    motorDirection = newMotorDirection;
+    prefs.begin("respooler", false);
+    prefs.putUInt("dir", motorDirection);
+    prefs.end();
+    digitalWrite(DIR_PIN, motorDirection);
+    delayStartUntil = now + 1000;
+    shouldStartMotorNow = true;
+    pendingDirectionChange = false;
+  }
+
+  // ------------ Motor start logic ----------------
+  if (shouldStartMotorNow && now >= delayStartUntil) {
+    if (otaInProgress) {
+      shouldStartMotorNow = false;
+      return;
+    }
+    if (isMotorRunning) {
+      shouldStartMotorNow = false;
+    } else if (!useFilamentSensor || filamentDetected) {
+      int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)targetStepIntervalMicros));
+      currSpeedPercent = constrain(currSpeedPercent, 50, 140);
+      totalEstimatedTime = calibrationAt80Speed * (80.0 / currSpeedPercent);
+      if (pausedElapsed > 0) {
+        spoolingStartTime = millis() - pausedElapsed;
+        pausedElapsed = 0;
+      } else {
+        spoolingStartTime = millis();
+      }
+      currentState = 'R';
+      sendStatus(true);
+      remStartHoldUntil = millis() + 800;
+      doneHoldActive = false;
+      stepperStop();
+      reSanitizeDriver();
+      digitalWrite(DIR_PIN, motorDirection);
+      digitalWrite(EN_PIN, LOW);
+      digitalWrite(STEP_PIN, LOW);
+      delay(15);
+      {
+        uint16_t prevI = driver.rms_current();
+        driver.en_spreadCycle(true);
+        int boosted = prevI + prevI / 4;
+        if (boosted > 1600) boosted = 1600;
+        driver.rms_current(boosted);
+        stepperStart(stepFreqFromIntervalUs(1800));
+        delay(150);
+        driver.rms_current(prevI);
+        driver.en_spreadCycle(false);
+      }
+      stepIntervalMicros = START_INTERVAL_US;
+      lastAccelUpdate = now;
+      isMotorRunning = true;
+      stepperStart(stepFreqFromIntervalUs(stepIntervalMicros));
+    }
+    shouldStartMotorNow = false;
+  }
+
+  // ------------ Button handling with debounce ------------
+  bool reading = digitalRead(BUTTON_PIN);
+  if (reading != lastStableButtonState && now - lastDebounceTime > BUTTON_DEBOUNCE_MS) {
+    lastDebounceTime = now;
+
+    if (reading == LOW) {
+      if (!isMotorRunning) {
+        if (currentState == 'P' || currentState == 'A') {
+          buttonPressSince = now;
+          buttonLongPressHandled = false;
+          buttonAwaitingDecision = true;
+        } else if (useFilamentSensor && !filamentDetected) {
+          if (!otaInProgress) {
+            for (int i = 0; i < 5; i++) {
+              led.setPixelColor(0, led.Color(0, 0, pwmValue));
+              led.show();
+              delay(100);
+              led.setPixelColor(0, 0);
+              led.show();
+              delay(100);
+            }
+          }
+        } else {
+          shouldStartMotorNow = true;
+          delayStartUntil = now;
+        }
+      } else {
+        isMotorRunning = false;
+        stepperStop();
+        digitalWrite(EN_PIN, HIGH);
+        digitalWrite(STEP_PIN, LOW);
+        unsigned long elapsed = 0;
+        if (spoolingStartTime > 0) {
+          elapsed = millis() - spoolingStartTime;
+        }
+        pausedElapsed = elapsed;
+        spoolingStartTime = 0;
+        currentState = 'P';
+        sendStatus(true);
+      }
+    } else {
+      if (buttonAwaitingDecision) {
+        if (!buttonLongPressHandled) {
+          if (!(useFilamentSensor && !filamentDetected)) {
+            shouldStartMotorNow = true;
+            delayStartUntil = now;
+          }
+        }
+        buttonAwaitingDecision = false;
+      }
+    }
+    lastStableButtonState = reading;
+  }
+  if (buttonAwaitingDecision && !buttonLongPressHandled && (digitalRead(BUTTON_PIN) == LOW)) {
+    if (now - buttonPressSince >= 1000) {
+      remHoldActive = true;
+      remHoldExpiry = millis() + 200;
+      progHoldActive = true;
+      progHoldExpiry = millis() + 200;
+      isMotorRunning = false;
+      progress = 0.0;
+      totalEstimatedTime = 0;
+      spoolingStartTime = 0;
+      pausedElapsed = 0;
+      stepperStop();
+      digitalWrite(EN_PIN, HIGH);
+      digitalWrite(STEP_PIN, LOW);
+      currentState = 'I';
+      sendStatus(true);
+      buttonLongPressHandled = true;
+    }
+  }
+
+  // ----------- Motor acceleration (speed ramp) --------------
+  if (isMotorRunning && now - lastAccelUpdate > ACCEL_UPDATE_INTERVAL) {
+    lastAccelUpdate = now;
+    if (stepIntervalMicros > targetStepIntervalMicros) {
+      stepIntervalMicros -= ACCEL_STEP;
+      if (stepIntervalMicros < targetStepIntervalMicros) stepIntervalMicros = targetStepIntervalMicros;
+    } else if (stepIntervalMicros < targetStepIntervalMicros) {
+      stepIntervalMicros += ACCEL_STEP;
+      if (stepIntervalMicros > targetStepIntervalMicros) stepIntervalMicros = targetStepIntervalMicros;
+    }
+    if (stepIntervalMicros != lastIntervalMicros) {
+      stepperSetFreq(stepFreqFromIntervalUs(stepIntervalMicros));
+      lastIntervalMicros = stepIntervalMicros;
+    }
+    if (stepIntervalMicros == targetStepIntervalMicros) {
+      int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
+      currSpeedPercent = constrain(currSpeedPercent, 50, 140);
+      unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
+      unsigned long elapsed = millis() - spoolingStartTime;
+      if (totalEstimatedTime > 0) {
+        float progressRatio = (float)elapsed / totalEstimatedTime;
+        spoolingStartTime = millis() - (newTotal * progressRatio);
+      }
+      totalEstimatedTime = newTotal;
+    }
+  }
+
+  // ------------- Connection LED animation ------------------
+  if (!otaInProgress) {
+    static int connLedPulse = 0;
+    static int connLedDir = 2;
+
+    if (!deviceConnected) {
+      if (now - lastConnLedTime > 25) {
+        lastConnLedTime = now;
+        connLedPulse += connLedDir;
+        if (connLedPulse >= LED_CONN_PULSE_MAX) {
+          connLedPulse = LED_CONN_PULSE_MAX;
+          connLedDir = -2;
+        } else if (connLedPulse <= 0) {
+          connLedPulse = 0;
+          connLedDir = 2;
+        }
+        setConnLed(connLedPulse);
+      }
+    } else {
+      ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
+      ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+    }
+  }
+
+  // ---------------------- Jingle trigger ---------------------
+  if (triggerJingleNow != 0) {
+    playStepperJingle();
+    triggerJingleNow = 0;
+  }
+
+  // ----------- Restart BLE advertising if disconnected --------------
+  if (!deviceConnected && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+    NimBLEDevice::startAdvertising();
+  }
+
+  // ------------------ Guide servo movement -----------------
+  if (isMotorRunning) {
+    if (!servoWasRunning) {
+      servoWasRunning = true;
+      lastMotorStepAccTime = now;
+      servoHomingToHome = false;
+      servoGotoActive = false;
+    } else {
+      unsigned long dtMs = now - lastMotorStepAccTime;
+      if (dtMs > 0) {
+        lastMotorStepAccTime = now;
+
+        float stepsPerSec = (float)stepFreqFromIntervalUs(stepIntervalMicros);
+        motorStepAcc += stepsPerSec * ((float)dtMs / 1000.0f);
+        float stepsPerSpoolRev = (200.0f * (float)MICROSTEPPING) * (52.0f / 18.0f);
+
+        while (motorStepAcc >= stepsPerSpoolRev) {
+          motorStepAcc -= stepsPerSpoolRev;
+
+          float target = guideServoTowardsL ? (float)servoAngleL : (float)servoAngleR;
+          float stepDeg = servoStepMm * (360.0f / (35.0f * 3.77f));
+          if (stepDeg < 0.05f) stepDeg = 0.05f;
+
+          if (fabsf(guideServoPos - target) <= stepDeg) {
+            guideServoPos = target;
+            setServoAngle((int)lroundf(guideServoPos));
+            guideServoTowardsL = !guideServoTowardsL;
+          } else {
+            guideServoPos += (guideServoPos < target) ? stepDeg : -stepDeg;
+            setServoAngle((int)lroundf(guideServoPos));
+          }
+        }
+      }
+    }
+  } else {
+    servoWasRunning = false;
+  }
+
+  if (currentState == 'I' && lastStateForServo != 'I') {
+    guideServoTowardsL = servoHomeIsR;
+    motorStepAcc = 0.0f;
+    servoWasRunning = false;
+    servoHomingToHome = true;
+    lastServoHomeStepTime = now;
+  }
+  lastStateForServo = currentState;
+  
+  // ------------------ Respooler done ------------------
+  if (currentState == 'D' && lastStateForDone != 'D') {
+    servoHomeAfterDonePending = true;
+  }
+  if (currentState != 'D' && lastStateForDone == 'D') {
+    servoHomeAfterDonePending = false;
+  }
+  lastStateForDone = currentState;
+
+  if (servoHomeAfterDonePending && currentState == 'D' && !isMotorRunning) {
+    guideServoTowardsL = servoHomeIsR;
+    servoHomingToHome = true;
+    lastServoHomeStepTime = now;
+    servoHomeAfterDonePending = false;
+  }
+
+  // ------------------ Servo goto ------------------
+  if (!isMotorRunning && servoGotoActive) {
+    if (now - lastServoHomeStepTime >= 10) {
+      lastServoHomeStepTime = now;
+
+      float target;
+      if (servoGotoSide == 'L') target = (float)servoAngleL;
+      else if (servoGotoSide == 'R') target = (float)servoAngleR;
+      else if (servoGotoSide == 'H') target = (float)(servoHomeIsR ? servoAngleR : servoAngleL);
+      else {
+        servoGotoActive = false;
+        return;
+      }
+
+      float stepDeg = 1.0f;
+
+      if (fabsf(guideServoPos - target) <= stepDeg) {
+        guideServoPos = target;
+        setServoAngle((int)lroundf(guideServoPos));
+        servoGotoActive = false;
+      } else {
+        guideServoPos += (guideServoPos < target) ? stepDeg : -stepDeg;
+        setServoAngle((int)lroundf(guideServoPos));
+      }
+    }
+  }
+
+  // ------------------ Servo homing ------------------
+  if (!isMotorRunning && servoHomingToHome) {
+    if (now - lastServoHomeStepTime >= 10) {
+      lastServoHomeStepTime = now;
+
+      float targetHome = (float)(servoHomeIsR ? servoAngleR : servoAngleL);
+      float stepDeg = 1.0f;
+
+      if (fabsf(guideServoPos - targetHome) <= stepDeg) {
+        guideServoPos = targetHome;
+        setServoAngle((int)lroundf(guideServoPos));
+        servoHomingToHome = false;
+      } else {
+        guideServoPos += (guideServoPos < targetHome) ? stepDeg : -stepDeg;
+        setServoAngle((int)lroundf(guideServoPos));
+      }
+    }
+  }
+
+  // ---------------- Fan control logic ----------------
+  int fanPWM = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter) ? fanPWMFromSpeed(fanSpeed) : 0;
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL, fanPWM);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL);
+  if (!isMotorRunning && fanPWM > 0 && fanStopAfter == 0) {
+    fanStopAfter = millis() + 10000;
+  }
+  if (isMotorRunning) fanStopAfter = millis() + 10000;
+  if (!fanAlwaysOn && !isMotorRunning && millis() >= fanStopAfter) {
+    fanStopAfter = 0;
+  }
+
+  // ----------- Periodic Status-Update every 500 ms -----------
+  static unsigned long lastStatusTime = 0;
+  if (millis() - lastStatusTime > 500) {
+    sendStatus();
+    lastStatusTime = millis();
+  }
 }
