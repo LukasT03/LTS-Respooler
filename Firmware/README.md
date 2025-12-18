@@ -4,6 +4,7 @@ These are the firmware files for all the board versions. The .bin files are used
 
 ### 1.2.0
 - Added support for upcoming Respooler Pro with precise servo control
+- Important: App needs to be uptated to 1.7.0
 
 ### 1.1.2
 - Added ability to exit Auto-Stop state via long button press
