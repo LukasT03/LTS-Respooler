@@ -19,7 +19,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.2.0"
+#define FIRMWARE_VERSION "1.2.1"
 #define BOARD_NAME "LTS CB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -595,7 +595,7 @@ void sendOTAUpdate() {
   currentState = 'U';
   sendStatus(true);
   xTaskCreate([](void*) {
-    const char* ota_url = "https://download.lts-design.com/Firmware/ControlBoard_V4_OTA.bin";
+    const char* ota_url = "https://respooler.lts-design.com/Firmware/ControlBoard_V4_OTA.bin";
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
