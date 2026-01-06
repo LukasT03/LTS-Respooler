@@ -2,6 +2,9 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.2.1
+- Changed OTA-Update URL
+
 ### 1.2.0
 - Added support for upcoming Respooler Pro with precise servo control
 - App needs to be uptated to 1.7.0
