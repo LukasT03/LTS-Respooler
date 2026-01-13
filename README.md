@@ -5,7 +5,7 @@ The LTS Respooler is a compact and slightly over-engineered filament Respooler o
 ## ➡️ Upcoming features and files:
 
 - Official attachment for spools bigger than 1 kg
-- Respooler Pro beta 3D files (compatible with current PCBs)
+- Respooler Pro MakerWorld listing
 
 ## 🚀 Getting started
 
