@@ -379,9 +379,15 @@ void setMotorCurrent(int percent) {
   driver.rms_current(strengthCurrent);
 }
 
+// SpreadCycle gives more torque than StealthChop, but StallGuard (torque auto-stop)
+// only works in StealthChop, so only use SpreadCycle while auto-stop is off.
+inline bool useSpreadCycle() {
+  return torqueLimit == 0;
+}
+
 void reSanitizeDriver() {
   driver.GSTAT(0b111);
-  driver.en_spreadCycle(false);
+  driver.en_spreadCycle(useSpreadCycle());
   driver.pwm_autoscale(true);
   driver.pwm_autograd(true);
   driver.microsteps(MICROSTEPPING);
@@ -882,6 +888,7 @@ void handleCommand(const std::string& cmd) {
         prefs.putUInt("torqueLimit", torqueLimit);
         prefs.end();
       }
+      driver.en_spreadCycle(useSpreadCycle());
       changed = true;
     }
     if (set.containsKey("JIN")) {
@@ -945,6 +952,7 @@ void handleCommand(const std::string& cmd) {
           prefs.putUInt("torqueLimit", torqueLimit);
           prefs.end();
         }
+        driver.en_spreadCycle(useSpreadCycle());
         changed = true;
       }
     }
@@ -1190,7 +1198,7 @@ void setup() {
   driver.begin();
   driver.toff(3);
   driver.microsteps(MICROSTEPPING);
-  driver.en_spreadCycle(false);
+  driver.en_spreadCycle(useSpreadCycle());
   driver.pwm_autoscale(true);
   driver.pwm_autograd(true);
   driver.SGTHRS(40);
@@ -1577,7 +1585,7 @@ void loop() {
         stepperStart(stepFreqFromIntervalUs(1800));
         delay(150);
         driver.rms_current(prevI);
-        driver.en_spreadCycle(false);
+        driver.en_spreadCycle(useSpreadCycle());
       }
       stepIntervalMicros = START_INTERVAL_US;
       lastAccelUpdate = now;
