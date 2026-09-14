@@ -19,7 +19,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.2.3"
 #define BOARD_NAME "LTS CB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -38,6 +38,11 @@
 // ------------------------ Motor Parameters ----------------------
 #define MICROSTEPPING 8
 #define R_SENSE 0.11f
+#define VBUS_SENSE_PIN 4   // USB-C VBUS through 20k/2.7k divider
+#define PD_GOOD_PIN 7      // CH224K PG, open-drain, low once PD voltage is negotiated
+#define VBUS_DIVIDER ((20.0f + 2.7f) / 2.7f)
+#define STD_CURRENT_MAX_MA 1400
+#define HIGH_CURRENT_MAX_MA 1700
 
 // -------------------- Timing and Limits --------------------------
 #define START_INTERVAL_US 700
@@ -102,6 +107,7 @@ uint8_t boardVariant = 0;
 
 // --------------- High-Speed mode state -----------------
 bool highSpeedMode = false;
+bool highCurrentMode = false;
 int savedTorqueLimitHS = 0;
 unsigned long baseTargetStepIntervalMicros = DEFAULT_INTERVAL_US;
 
@@ -347,6 +353,7 @@ void loadSettings() {
   useFilamentSensor = prefs.getBool("filamentSensor", true);
   motorStrength = prefs.getUInt("motorStrength", 100);
   torqueLimit = prefs.getUInt("torqueLimit", 0);
+  highCurrentMode = prefs.getBool("hiCur", false);
   highSpeedMode = prefs.getBool("hsMode", false);
   if (highSpeedMode) {
     savedTorqueLimitHS = torqueLimit;
@@ -375,8 +382,14 @@ void loadSettings() {
 }
 
 void setMotorCurrent(int percent) {
-  int strengthCurrent = map(percent, 80, 120, 700, 1400);
+  int strengthCurrent = map(percent, 80, 120, 700, highCurrentMode ? HIGH_CURRENT_MAX_MA : STD_CURRENT_MAX_MA);
   driver.rms_current(strengthCurrent);
+}
+
+int readVbusMillivolts() {
+  uint32_t sum = 0;
+  for (int i = 0; i < 4; i++) sum += analogReadMilliVolts(VBUS_SENSE_PIN);
+  return (int)lroundf((sum / 4.0f) * VBUS_DIVIDER);
 }
 
 // SpreadCycle gives more torque than StealthChop, but StallGuard (torque auto-stop)
@@ -473,6 +486,9 @@ void sendStatus(bool forceSend = false) {
   doc["WGT"] = targetWeight;
   doc["DUR"] = calibrationAt80Speed / 1000;
   doc["HS"] = highSpeedMode;
+  doc["HI_CUR"] = highCurrentMode;
+  doc["VBUS_MV"] = readVbusMillivolts();
+  doc["PG"] = digitalRead(PD_GOOD_PIN) == LOW;
   doc["FAN_SPD"] = fanSpeed;
   doc["FAN_ON"] = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter);
   doc["FAN_ALW"] = fanAlwaysOn;
@@ -874,6 +890,14 @@ void handleCommand(const std::string& cmd) {
       prefs.end();
       changed = true;
     }
+    if (set.containsKey("HI_CUR")) {
+      highCurrentMode = (int)set["HI_CUR"] != 0;
+      setMotorCurrent(motorStrength);
+      prefs.begin("respooler", false);
+      prefs.putBool("hiCur", highCurrentMode);
+      prefs.end();
+      changed = true;
+    }
     if (set.containsKey("TRQ")) {
       int newTrq = constrain((int)set["TRQ"], 0, 3);
       if (highSpeedMode) {
@@ -1107,6 +1131,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(LED_CONN_PIN, OUTPUT);
   pinMode(FAN_PIN, OUTPUT);
+  pinMode(PD_GOOD_PIN, INPUT);
 
   ledc_timer_config_t servo_timer = {
     .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -1580,7 +1605,8 @@ void loop() {
         uint16_t prevI = driver.rms_current();
         driver.en_spreadCycle(true);
         int boosted = prevI + prevI / 4;
-        if (boosted > 1600) boosted = 1600;
+        int boostCap = highCurrentMode ? HIGH_CURRENT_MAX_MA : 1600;
+        if (boosted > boostCap) boosted = boostCap;
         driver.rms_current(boosted);
         stepperStart(stepFreqFromIntervalUs(1800));
         delay(150);
