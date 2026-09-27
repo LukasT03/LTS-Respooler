@@ -85,6 +85,8 @@ int targetWeight = 0;                         // 0-3
 int torqueLimit = 0;                          // 0-3
 int jingleStyle = 0;                          // 0-3
 unsigned long calibrationAt80Speed = 895000;  // ms
+bool calibrationHighSpeed = false;            // high-speed mode the calibration was entered in
+const double HIGH_SPEED_FACTOR = 1.4;
 String wifiSSID = "";                         // string
 String wifiPassword = "";                     // string
 int fanSpeed = 60;                            // 0–100
@@ -329,12 +331,20 @@ int getSpeedPercentFromInterval(unsigned long us) {
 
 void applySpeedTarget() {
   if (highSpeedMode) {
-    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
+    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / HIGH_SPEED_FACTOR);
     if (adjusted < 50) adjusted = 50;
     targetStepIntervalMicros = adjusted;
   } else {
     targetStepIntervalMicros = baseTargetStepIntervalMicros;
   }
+}
+
+// currSpeedPercent already includes the high-speed boost; the calibration was measured by the user in
+// whichever mode was active when they entered it, so only scale when the current mode differs from that
+unsigned long estimatedTotalMs(int currSpeedPercent) {
+  double total = (double)calibrationAt80Speed * (80.0 / currSpeedPercent);
+  if (calibrationHighSpeed) total *= HIGH_SPEED_FACTOR;
+  return (unsigned long)llround(total);
 }
 void loadSettings() {
   prefs.begin("respooler", true);
@@ -354,6 +364,7 @@ void loadSettings() {
   }
   jingleStyle = prefs.getUInt("jingle", 0);
   calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
+  calibrationHighSpeed = prefs.getBool("cal80HS", false);
   fanSpeed = prefs.getUInt("fanSpeed", 60);
   fanAlwaysOn = prefs.getBool("fanAlways", false);
   targetWeight = prefs.getUInt("targetWeight", 0);
@@ -901,8 +912,10 @@ void handleCommand(const std::string& cmd) {
       unsigned long dur = (unsigned long)set["DUR"];
       if (dur >= 10 && dur <= 20000) {
         calibrationAt80Speed = dur * 1000UL;
+        calibrationHighSpeed = highSpeedMode;
         prefs.begin("respooler", false);
         prefs.putULong("cal80_093", calibrationAt80Speed);
+        prefs.putBool("cal80HS", calibrationHighSpeed);
         prefs.end();
         changed = true;
       }
@@ -1553,7 +1566,7 @@ void loop() {
     } else if (!useFilamentSensor || filamentDetected) {
       int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)targetStepIntervalMicros));
       currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-      totalEstimatedTime = calibrationAt80Speed * (80.0 / currSpeedPercent);
+      totalEstimatedTime = estimatedTotalMs(currSpeedPercent);
       if (pausedElapsed > 0) {
         spoolingStartTime = millis() - pausedElapsed;
         pausedElapsed = 0;
@@ -1680,11 +1693,12 @@ void loop() {
     if (stepIntervalMicros == targetStepIntervalMicros) {
       int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
       currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-      unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
-      unsigned long elapsed = millis() - spoolingStartTime;
-      if (totalEstimatedTime > 0) {
-        float progressRatio = (float)elapsed / totalEstimatedTime;
-        spoolingStartTime = millis() - (newTotal * progressRatio);
+      unsigned long newTotal = estimatedTotalMs(currSpeedPercent);
+      // Only rebase when the estimate changes; rebasing every tick truncated up to 1 ms per 20 ms and made the countdown lag
+      if (totalEstimatedTime > 0 && newTotal != totalEstimatedTime) {
+        unsigned long elapsed = millis() - spoolingStartTime;
+        double progressRatio = (double)elapsed / (double)totalEstimatedTime;
+        spoolingStartTime = millis() - (unsigned long)llround(newTotal * progressRatio);
       }
       totalEstimatedTime = newTotal;
     }
