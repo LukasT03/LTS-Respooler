@@ -1,13 +1,10 @@
-# ⚙️🧵 Welcome to the LTS Respooler GitHub! 🧵⚙️
-
+# LTS Respooler
 The LTS Respooler is a compact and slightly over-engineered filament Respooler optimized for Bambu Lab spools. It integrates a filament runout sensor and wireless app-connectivity for ease of use. The LTS Respooler Pro uses a 9g servo motor to precisely position the Filament Guide. You can find all the files related to it here. That includes the raw .txt ESP32 Code, the .bin firmware files and the PCB Gerber files.
 
 ## ➡️ Upcoming features and files:
-
 - Official attachment for spools bigger than 1 kg
 
 ## 🚀 Getting started
-
 - All the 3D files can be downloaded and printed from [MakerWorld](https://makerworld.com/@lukas.tu)
 - Assembly Intructions and the Needed Hardware PDF can also be found there
 - Most of the Hardware can be ordered from Bambu Lab's Maker's Supply
@@ -15,5 +12,4 @@ The LTS Respooler is a compact and slightly over-engineered filament Respooler o
 - Flash the newest firmware version to your ESP32 or LTS Control Board using the [Web Flasher](https://flash.lts-design.com)
 
 ## 📋 License
-
 This project is licensed under the MIT license, giving you the freedom to use it however you like. Contributions, modifications, and improvements are very welcome! :)
