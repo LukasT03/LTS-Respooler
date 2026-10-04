@@ -19,7 +19,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.2.3"
 #define BOARD_NAME "LTS CB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -38,6 +38,11 @@
 // ------------------------ Motor Parameters ----------------------
 #define MICROSTEPPING 8
 #define R_SENSE 0.11f
+#define VBUS_SENSE_PIN 4   // USB-C VBUS through 20k/2.7k divider
+#define PD_GOOD_PIN 7      // CH224K PG, open-drain, low once PD voltage is negotiated
+#define VBUS_DIVIDER ((20.0f + 2.7f) / 2.7f)
+#define STD_CURRENT_MAX_MA 1400
+#define HIGH_CURRENT_MAX_MA 1700
 
 // -------------------- Timing and Limits --------------------------
 #define START_INTERVAL_US 700
@@ -84,6 +89,8 @@ int targetWeight = 0;                         // 0-3
 int torqueLimit = 0;                          // 0-3
 int jingleStyle = 0;                          // 0-3
 unsigned long calibrationAt80Speed = 895000;  // ms
+bool calibrationHighSpeed = false;            // high-speed mode the calibration was entered in
+const double HIGH_SPEED_FACTOR = 1.4;
 
 String wifiSSID = "";      // string
 String wifiPassword = "";  // string
@@ -102,6 +109,7 @@ uint8_t boardVariant = 0;
 
 // --------------- High-Speed mode state -----------------
 bool highSpeedMode = false;
+bool highCurrentMode = false;
 int savedTorqueLimitHS = 0;
 unsigned long baseTargetStepIntervalMicros = DEFAULT_INTERVAL_US;
 
@@ -328,12 +336,20 @@ int getSpeedPercentFromInterval(unsigned long us) {
 
 void applySpeedTarget() {
   if (highSpeedMode) {
-    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
+    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / HIGH_SPEED_FACTOR);
     if (adjusted < 50) adjusted = 50;
     targetStepIntervalMicros = adjusted;
   } else {
     targetStepIntervalMicros = baseTargetStepIntervalMicros;
   }
+}
+
+// currSpeedPercent already includes the high-speed boost; the calibration was measured by the user in
+// whichever mode was active when they entered it, so only scale when the current mode differs from that
+unsigned long estimatedTotalMs(int currSpeedPercent) {
+  double total = (double)calibrationAt80Speed * (80.0 / currSpeedPercent);
+  if (calibrationHighSpeed) total *= HIGH_SPEED_FACTOR;
+  return (unsigned long)llround(total);
 }
 
 void loadSettings() {
@@ -347,6 +363,7 @@ void loadSettings() {
   useFilamentSensor = prefs.getBool("filamentSensor", true);
   motorStrength = prefs.getUInt("motorStrength", 100);
   torqueLimit = prefs.getUInt("torqueLimit", 0);
+  highCurrentMode = prefs.getBool("hiCur", false);
   highSpeedMode = prefs.getBool("hsMode", false);
   if (highSpeedMode) {
     savedTorqueLimitHS = torqueLimit;
@@ -354,6 +371,7 @@ void loadSettings() {
   }
   jingleStyle = prefs.getUInt("jingle", 0);
   calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
+  calibrationHighSpeed = prefs.getBool("cal80HS", false);
   fanSpeed = prefs.getUInt("fanSpeed", 60);
   fanAlwaysOn = prefs.getBool("fanAlways", false);
   targetWeight = prefs.getUInt("targetWeight", 0);
@@ -375,13 +393,25 @@ void loadSettings() {
 }
 
 void setMotorCurrent(int percent) {
-  int strengthCurrent = map(percent, 80, 120, 700, 1400);
+  int strengthCurrent = map(percent, 80, 120, 700, highCurrentMode ? HIGH_CURRENT_MAX_MA : STD_CURRENT_MAX_MA);
   driver.rms_current(strengthCurrent);
+}
+
+int readVbusMillivolts() {
+  uint32_t sum = 0;
+  for (int i = 0; i < 4; i++) sum += analogReadMilliVolts(VBUS_SENSE_PIN);
+  return (int)lroundf((sum / 4.0f) * VBUS_DIVIDER);
+}
+
+// SpreadCycle gives more torque than StealthChop, but StallGuard (torque auto-stop)
+// only works in StealthChop, so only use SpreadCycle while auto-stop is off.
+inline bool useSpreadCycle() {
+  return torqueLimit == 0;
 }
 
 void reSanitizeDriver() {
   driver.GSTAT(0b111);
-  driver.en_spreadCycle(false);
+  driver.en_spreadCycle(useSpreadCycle());
   driver.pwm_autoscale(true);
   driver.pwm_autograd(true);
   driver.microsteps(MICROSTEPPING);
@@ -467,6 +497,9 @@ void sendStatus(bool forceSend = false) {
   doc["WGT"] = targetWeight;
   doc["DUR"] = calibrationAt80Speed / 1000;
   doc["HS"] = highSpeedMode;
+  doc["HI_CUR"] = highCurrentMode;
+  doc["VBUS_MV"] = readVbusMillivolts();
+  doc["PG"] = digitalRead(PD_GOOD_PIN) == LOW;
   doc["FAN_SPD"] = fanSpeed;
   doc["FAN_ON"] = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter);
   doc["FAN_ALW"] = fanAlwaysOn;
@@ -868,6 +901,14 @@ void handleCommand(const std::string& cmd) {
       prefs.end();
       changed = true;
     }
+    if (set.containsKey("HI_CUR")) {
+      highCurrentMode = (int)set["HI_CUR"] != 0;
+      setMotorCurrent(motorStrength);
+      prefs.begin("respooler", false);
+      prefs.putBool("hiCur", highCurrentMode);
+      prefs.end();
+      changed = true;
+    }
     if (set.containsKey("TRQ")) {
       int newTrq = constrain((int)set["TRQ"], 0, 3);
       if (highSpeedMode) {
@@ -882,6 +923,7 @@ void handleCommand(const std::string& cmd) {
         prefs.putUInt("torqueLimit", torqueLimit);
         prefs.end();
       }
+      driver.en_spreadCycle(useSpreadCycle());
       changed = true;
     }
     if (set.containsKey("JIN")) {
@@ -899,8 +941,10 @@ void handleCommand(const std::string& cmd) {
       unsigned long dur = (unsigned long)set["DUR"];
       if (dur >= 10 && dur <= 20000) {
         calibrationAt80Speed = dur * 1000UL;
+        calibrationHighSpeed = highSpeedMode;
         prefs.begin("respooler", false);
         prefs.putULong("cal80_093", calibrationAt80Speed);
+        prefs.putBool("cal80HS", calibrationHighSpeed);
         prefs.end();
         changed = true;
       }
@@ -945,6 +989,7 @@ void handleCommand(const std::string& cmd) {
           prefs.putUInt("torqueLimit", torqueLimit);
           prefs.end();
         }
+        driver.en_spreadCycle(useSpreadCycle());
         changed = true;
       }
     }
@@ -1099,6 +1144,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(LED_CONN_PIN, OUTPUT);
   pinMode(FAN_PIN, OUTPUT);
+  pinMode(PD_GOOD_PIN, INPUT);
 
   ledc_timer_config_t servo_timer = {
     .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -1190,7 +1236,7 @@ void setup() {
   driver.begin();
   driver.toff(3);
   driver.microsteps(MICROSTEPPING);
-  driver.en_spreadCycle(false);
+  driver.en_spreadCycle(useSpreadCycle());
   driver.pwm_autoscale(true);
   driver.pwm_autograd(true);
   driver.SGTHRS(40);
@@ -1551,7 +1597,7 @@ void loop() {
     } else if (!useFilamentSensor || filamentDetected) {
       int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)targetStepIntervalMicros));
       currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-      totalEstimatedTime = calibrationAt80Speed * (80.0 / currSpeedPercent);
+      totalEstimatedTime = estimatedTotalMs(currSpeedPercent);
       if (pausedElapsed > 0) {
         spoolingStartTime = millis() - pausedElapsed;
         pausedElapsed = 0;
@@ -1572,12 +1618,13 @@ void loop() {
         uint16_t prevI = driver.rms_current();
         driver.en_spreadCycle(true);
         int boosted = prevI + prevI / 4;
-        if (boosted > 1600) boosted = 1600;
+        int boostCap = highCurrentMode ? HIGH_CURRENT_MAX_MA : 1600;
+        if (boosted > boostCap) boosted = boostCap;
         driver.rms_current(boosted);
         stepperStart(stepFreqFromIntervalUs(1800));
         delay(150);
         driver.rms_current(prevI);
-        driver.en_spreadCycle(false);
+        driver.en_spreadCycle(useSpreadCycle());
       }
       stepIntervalMicros = START_INTERVAL_US;
       lastAccelUpdate = now;
@@ -1677,11 +1724,12 @@ void loop() {
     if (stepIntervalMicros == targetStepIntervalMicros) {
       int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
       currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-      unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
-      unsigned long elapsed = millis() - spoolingStartTime;
-      if (totalEstimatedTime > 0) {
-        float progressRatio = (float)elapsed / totalEstimatedTime;
-        spoolingStartTime = millis() - (newTotal * progressRatio);
+      unsigned long newTotal = estimatedTotalMs(currSpeedPercent);
+      // Only rebase when the estimate changes; rebasing every tick truncated up to 1 ms per 20 ms and made the countdown lag
+      if (totalEstimatedTime > 0 && newTotal != totalEstimatedTime) {
+        unsigned long elapsed = millis() - spoolingStartTime;
+        double progressRatio = (double)elapsed / (double)totalEstimatedTime;
+        spoolingStartTime = millis() - (unsigned long)llround(newTotal * progressRatio);
       }
       totalEstimatedTime = newTotal;
     }
