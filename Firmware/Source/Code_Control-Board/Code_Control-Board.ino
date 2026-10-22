@@ -19,7 +19,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.3.0"
 #define BOARD_NAME "LTS CB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -34,10 +34,16 @@
 #define BUTTON_PIN 10
 #define FAN_PIN 13
 #define SERVO_PIN 12
+#define VBUS_SENSE_PIN 4
+#define PD_GOOD_PIN 7
 
 // ------------------------ Motor Parameters ----------------------
 #define MICROSTEPPING 8
 #define R_SENSE 0.11f
+#define HIGH_SPEED_FACTOR 1.4
+
+// ------------------------ USB-C Power ---------------------------
+#define VBUS_DIVIDER ((20.0f + 2.7f) / 2.7f)
 
 // -------------------- Timing and Limits --------------------------
 #define START_INTERVAL_US 700
@@ -328,7 +334,7 @@ int getSpeedPercentFromInterval(unsigned long us) {
 
 void applySpeedTarget() {
   if (highSpeedMode) {
-    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
+    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / HIGH_SPEED_FACTOR);
     if (adjusted < 50) adjusted = 50;
     targetStepIntervalMicros = adjusted;
   } else {
@@ -381,11 +387,18 @@ void setMotorCurrent(int percent) {
 
 void reSanitizeDriver() {
   driver.GSTAT(0b111);
-  driver.en_spreadCycle(false);
+  driver.I_scale_analog(false);
+  driver.en_spreadCycle(highSpeedMode);
   driver.pwm_autoscale(true);
   driver.pwm_autograd(true);
   driver.microsteps(MICROSTEPPING);
   setMotorCurrent(motorStrength);
+}
+
+int readVbusMillivolts() {
+  uint32_t sum = 0;
+  for (int i = 0; i < 4; i++) sum += analogReadMilliVolts(VBUS_SENSE_PIN);
+  return (int)lroundf((sum / 4.0f) * VBUS_DIVIDER);
 }
 
 // ------------------- BLE status/error/settings -------------------
@@ -454,6 +467,8 @@ void sendStatus(bool forceSend = false) {
   doc["PROG"] = progVal;
   doc["REM"] = remVal;
   doc["TEMP"] = chipTemp;
+  doc["VBUS_MV"] = readVbusMillivolts();
+  doc["PG"] = digitalRead(PD_GOOD_PIN) == LOW;
   doc["WIFI_SSID"] = wifiSSID.length() > 0 ? wifiSSID.c_str() : nullptr;
   doc["WIFI_OK"] = WiFi.status() == WL_CONNECTED;
   doc["FW"] = FIRMWARE_VERSION;
@@ -945,6 +960,7 @@ void handleCommand(const std::string& cmd) {
           prefs.putUInt("torqueLimit", torqueLimit);
           prefs.end();
         }
+        driver.en_spreadCycle(highSpeedMode);
         changed = true;
       }
     }
@@ -1099,6 +1115,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(LED_CONN_PIN, OUTPUT);
   pinMode(FAN_PIN, OUTPUT);
+  pinMode(PD_GOOD_PIN, INPUT);
 
   ledc_timer_config_t servo_timer = {
     .speed_mode = LEDC_LOW_SPEED_MODE,
@@ -1188,6 +1205,7 @@ void setup() {
   TMCSerial.begin(115200, SERIAL_8N1, TMC_UART_RX, TMC_UART_TX);
 
   driver.begin();
+  driver.I_scale_analog(false);
   driver.toff(3);
   driver.microsteps(MICROSTEPPING);
   driver.en_spreadCycle(false);
@@ -1577,7 +1595,7 @@ void loop() {
         stepperStart(stepFreqFromIntervalUs(1800));
         delay(150);
         driver.rms_current(prevI);
-        driver.en_spreadCycle(false);
+        driver.en_spreadCycle(highSpeedMode);
       }
       stepIntervalMicros = START_INTERVAL_US;
       lastAccelUpdate = now;
@@ -1678,10 +1696,10 @@ void loop() {
       int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
       currSpeedPercent = constrain(currSpeedPercent, 50, 140);
       unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
-      unsigned long elapsed = millis() - spoolingStartTime;
-      if (totalEstimatedTime > 0) {
-        float progressRatio = (float)elapsed / totalEstimatedTime;
-        spoolingStartTime = millis() - (newTotal * progressRatio);
+      if (totalEstimatedTime > 0 && newTotal != totalEstimatedTime) {
+        unsigned long elapsed = millis() - spoolingStartTime;
+        double progressRatio = (double)elapsed / totalEstimatedTime;
+        spoolingStartTime = millis() - (unsigned long)(newTotal * progressRatio);
       }
       totalEstimatedTime = newTotal;
     }

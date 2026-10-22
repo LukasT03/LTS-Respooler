@@ -20,7 +20,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.3.0"
 #define BOARD_NAME "LTS DB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -39,6 +39,7 @@
 // ------------------------ Motor Parameters ----------------------
 #define MICROSTEPPING 8
 #define R_SENSE 0.11f
+#define HIGH_SPEED_FACTOR 1.4
 
 // -------------------- Timing and Limits --------------------------
 #define START_INTERVAL_US 700
@@ -329,7 +330,7 @@ int getSpeedPercentFromInterval(unsigned long us) {
 
 void applySpeedTarget() {
   if (highSpeedMode) {
-    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / 1.4);
+    unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / HIGH_SPEED_FACTOR);
     if (adjusted < 50) adjusted = 50;
     targetStepIntervalMicros = adjusted;
   } else {
@@ -381,6 +382,7 @@ void setMotorCurrent(int percent) {
 
 void reSanitizeDriver() {
   driver.GSTAT(0b111);
+  driver.I_scale_analog(false);
   driver.en_spreadCycle(false);
   driver.pwm_autoscale(true);
   driver.pwm_autograd(true);
@@ -1190,6 +1192,7 @@ void setup() {
   TMCSerial.begin(115200, SERIAL_8N1, TMC_UART_RX, TMC_UART_TX);
 
   driver.begin();
+  driver.I_scale_analog(false);
   driver.toff(3);
   driver.microsteps(MICROSTEPPING);
   driver.en_spreadCycle(false);
@@ -1681,10 +1684,10 @@ void loop() {
       int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
       currSpeedPercent = constrain(currSpeedPercent, 50, 140);
       unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
-      unsigned long elapsed = millis() - spoolingStartTime;
-      if (totalEstimatedTime > 0) {
-        float progressRatio = (float)elapsed / totalEstimatedTime;
-        spoolingStartTime = millis() - (newTotal * progressRatio);
+      if (totalEstimatedTime > 0 && newTotal != totalEstimatedTime) {
+        unsigned long elapsed = millis() - spoolingStartTime;
+        double progressRatio = (double)elapsed / totalEstimatedTime;
+        spoolingStartTime = millis() - (unsigned long)(newTotal * progressRatio);
       }
       totalEstimatedTime = newTotal;
     }
