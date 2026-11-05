@@ -2,6 +2,10 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.3.1
+- Driver Board: Reverted to the 1.2.1 firmware because of crashes, a fix will follow
+- Control Board: No changes
+
 ### 1.3.0
 - Fixed issue where the motor would not get its full current (more torque)
 - Increased torque in High-Speed mode
