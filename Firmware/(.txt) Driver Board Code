@@ -16,11 +16,12 @@
 #include "esp_bt_main.h"
 #include "esp_coexist.h"
 #include <driver/ledc.h>
+#include "esp_private/periph_ctrl.h"
 #include "driver/gpio.h"
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.3.0"
+#define FIRMWARE_VERSION "1.3.2"
 #define BOARD_NAME "LTS DB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -196,8 +197,7 @@ void otaLedPulseTask(void* parameter) {
       otaLedDir = 1;
     }
 
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - otaLedPulse);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+    setLedcDuty(LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - otaLedPulse);
 
     uint16_t pulse255 = (uint16_t)((otaLedPulse * 255 + (LED_CONN_PULSE_MAX / 2)) / LED_CONN_PULSE_MAX);
     uint16_t scaled16 = (uint16_t)pulse255 * (uint16_t)pwmValue;
@@ -213,8 +213,7 @@ void otaLedPulseTask(void* parameter) {
     led.show();
     vTaskDelay(5 / portTICK_PERIOD_MS);
   }
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+  setLedcDuty(LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
   led.setPixelColor(0, 0);
   led.show();
   vTaskDelete(NULL);
@@ -292,17 +291,23 @@ int fanPWMFromSpeed(int percent) {
   return map(constrain(percent, 0, 100), 0, 100, 0, 255);
 }
 
+// Only write LEDC duty when it changes, frequent updates can hang the ESP32
+uint32_t ledcDuty[LEDC_CHANNEL_MAX];
+inline void setLedcDuty(ledc_channel_t channel, uint32_t duty) {
+  if (ledcDuty[channel] == duty) return;
+  ledcDuty[channel] = duty;
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, duty);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, channel);
+}
 inline void setServoAngle(int angle) {
   angle = constrain(angle, 0, 180);
   int pulseUs = map(angle, 0, 180, 500, 2500);
   uint32_t duty = (uint32_t)((((uint64_t)pulseUs) * ((1UL << 14) - 1) + 10000UL) / 20000UL);
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, SERVO_LEDC_CHANNEL, duty);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, SERVO_LEDC_CHANNEL);
+  setLedcDuty(SERVO_LEDC_CHANNEL, duty);
 }
 inline void setConnLed(uint8_t duty) {
   duty = constrain(duty, 0, 255);
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, 255 - duty);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+  setLedcDuty(LEDC_CHANNEL_2, 255 - duty);
 }
 inline uint32_t stepFreqFromIntervalUs(unsigned long us) {
   if (us < 1) us = 1;
@@ -1091,6 +1096,10 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
 
 // -------------------------- Setup --------------------------------
 void setup() {
+  // LEDC is not reset by a software restart, so do it here
+  periph_module_reset(PERIPH_LEDC_MODULE);
+  memset(ledcDuty, 0xFF, sizeof(ledcDuty));
+
   esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
   esp_coex_preference_set(ESP_COEX_PREFER_BT);
   pinMode(FILAMENT_PIN, INPUT_PULLUP);
@@ -1250,8 +1259,7 @@ void setup() {
 
   pAdvertising->setAdvertisementData(advData);
   pAdvertising->start();
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL, 0);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL);
+  setLedcDuty(FAN_CHANNEL, 0);
   setConnLed(150);
   currentState = 'I';
 }
@@ -1709,12 +1717,10 @@ void loop() {
           connLedPulse = 0;
           connLedDir = 2;
         }
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - connLedPulse);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+        setLedcDuty(LEDC_CHANNEL_2, LED_CONN_PULSE_MAX - connLedPulse);
       }
     } else {
-      ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
-      ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2);
+      setLedcDuty(LEDC_CHANNEL_2, LED_CONN_PULSE_MAX);
     }
   }
 
@@ -1840,8 +1846,7 @@ void loop() {
 
   // ---------------- Fan control logic ----------------
   int fanPWM = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter) ? fanPWMFromSpeed(fanSpeed) : 0;
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL, fanPWM);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, FAN_CHANNEL);
+  setLedcDuty(FAN_CHANNEL, fanPWM);
   if (!isMotorRunning && fanPWM > 0 && fanStopAfter == 0) {
     fanStopAfter = millis() + 10000;
   }

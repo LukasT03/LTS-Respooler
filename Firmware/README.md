@@ -2,6 +2,9 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.3.2
+- Fixed Driver Board freezing and getting stuck in a reboot loop
+
 ### 1.3.1
 - Reverted Driver Board to the 1.2.1 binary because of crashes
 
