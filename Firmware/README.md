@@ -2,6 +2,11 @@ These are the firmware files for all the board versions. The .bin files are used
 
 # Changelog:
 
+### 1.3.3
+- Added adjustable filament sensor sensitivity
+- Added option to continue after a power loss
+- Reference time is now based on the default speed (85 %)
+
 ### 1.3.2
 - Fixed Driver Board freezing and getting stuck in a reboot loop
 

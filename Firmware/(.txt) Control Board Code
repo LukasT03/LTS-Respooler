@@ -20,7 +20,7 @@
 #include <freertos/semphr.h>
 
 // ------------------------ Board Info ----------------------------
-#define FIRMWARE_VERSION "1.3.2"
+#define FIRMWARE_VERSION "1.3.3"
 #define BOARD_NAME "LTS CB"
 
 // --------------------- Hardware Pin Defines ---------------------
@@ -62,7 +62,9 @@
 #define TORQUE_SG_LIMIT_HIGH 0.97
 #define TORQUE_BELOW_MS 700
 #define MIN_RSSI_THRESHOLD -90
-#define FILAMENT_LOSS_CONFIRM_MS 100
+#define FILAMENT_LOSS_REF_INTERVAL_US 93
+#define DEFAULT_CALIBRATION_MS 840000
+#define RESUME_SAVE_INTERVAL_MS 2000
 #define STEP_DUTY_ON 512
 
 #define TARGET_WEIGHT_FACTOR_2 0.59f
@@ -86,11 +88,13 @@ int speedPercent = 85;                        // 50-100
 int motorDirection = 0;                       // 0, 1
 int ledBrightness = 50;                       // 0-100
 bool useFilamentSensor = true;                // true, false
+int filamentLossMs = 100;                     // 100, 200, 400
+bool resumeAfterPowerLoss = false;            // continue paused after a power loss
 int motorStrength = 100;                      // 80-120
 int targetWeight = 0;                         // 0-3
 int torqueLimit = 0;                          // 0-3
 int jingleStyle = 0;                          // 0-3
-unsigned long calibrationAt80Speed = 895000;  // ms
+unsigned long calibrationAt85Speed = DEFAULT_CALIBRATION_MS;  // ms
 
 String wifiSSID = "";      // string
 String wifiPassword = "";  // string
@@ -339,6 +343,60 @@ int getSpeedPercentFromInterval(unsigned long us) {
   return constrain(percent, 50, 100);
 }
 
+// Scale with speed so the same length of filament is tolerated, never below the set value
+unsigned long filamentLossConfirmMs() {
+  if (targetStepIntervalMicros <= FILAMENT_LOSS_REF_INTERVAL_US) return filamentLossMs;
+  return (unsigned long)filamentLossMs * targetStepIntervalMicros / FILAMENT_LOSS_REF_INTERVAL_US;
+}
+
+// Time for a full 1 kg spool, the calibration is done at 85 % speed
+unsigned long estimatedTotalMs(unsigned long intervalUs) {
+  int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)intervalUs));
+  currSpeedPercent = constrain(currSpeedPercent, 50, 140);
+  return calibrationAt85Speed * (85.0 / currSpeedPercent);
+}
+
+// ------------------- Resume after power loss -------------------
+// Only saved while the motor runs, so a pause or stop is never restored
+struct ResumeRecord {
+  uint32_t elapsedMs;
+  float servoPos;
+  bool servoTowardsL;
+};
+// Own instance, the BLE task writes settings through prefs at the same time
+Preferences resumePrefs;
+bool resumeSaved = false;
+
+void saveResumeRecord() {
+  ResumeRecord rec = { millis() - spoolingStartTime, guideServoPos, guideServoTowardsL };
+  resumePrefs.begin("resume", false);
+  resumePrefs.putBytes("rec", &rec, sizeof(rec));
+  resumePrefs.end();
+  resumeSaved = true;
+}
+
+void clearResumeRecord() {
+  resumePrefs.begin("resume", false);
+  resumePrefs.clear();
+  resumePrefs.end();
+  resumeSaved = false;
+}
+
+// Continue paused with the saved progress and servo position, the motor never starts on its own
+void restoreResumeRecord() {
+  ResumeRecord rec;
+  resumePrefs.begin("resume", true);
+  resumeSaved = resumePrefs.getBytes("rec", &rec, sizeof(rec)) == sizeof(rec);
+  resumePrefs.end();
+  if (!resumeSaved || !resumeAfterPowerLoss) return;
+  guideServoPos = rec.servoPos;
+  guideServoTowardsL = rec.servoTowardsL;
+  setServoAngle((int)lroundf(guideServoPos));
+  pausedElapsed = rec.elapsedMs;
+  totalEstimatedTime = estimatedTotalMs(targetStepIntervalMicros);
+  currentState = 'P';
+}
+
 void applySpeedTarget() {
   if (highSpeedMode) {
     unsigned long adjusted = (unsigned long)round((double)baseTargetStepIntervalMicros / HIGH_SPEED_FACTOR);
@@ -358,6 +416,8 @@ void loadSettings() {
   motorDirection = prefs.getUInt("dir", 0);
   ledBrightness = prefs.getUInt("led", 50);
   useFilamentSensor = prefs.getBool("filamentSensor", true);
+  filamentLossMs = prefs.getUInt("filLossMs", 100);
+  resumeAfterPowerLoss = prefs.getBool("resume", false);
   motorStrength = prefs.getUInt("motorStrength", 100);
   torqueLimit = prefs.getUInt("torqueLimit", 0);
   highSpeedMode = prefs.getBool("hsMode", false);
@@ -366,7 +426,9 @@ void loadSettings() {
     torqueLimit = 0;
   }
   jingleStyle = prefs.getUInt("jingle", 0);
-  calibrationAt80Speed = prefs.getULong("cal80_093", 895000);
+  // Firmware 1.3.2 and older stored the calibration at 80 % speed, convert it and round to 5 s
+  unsigned long oldCalibration = prefs.getULong("cal80_093", 0);
+  calibrationAt85Speed = prefs.getULong("cal85", oldCalibration ? (oldCalibration * 80 / 85 + 2500) / 5000 * 5000 : DEFAULT_CALIBRATION_MS);
   fanSpeed = prefs.getUInt("fanSpeed", 60);
   fanAlwaysOn = prefs.getBool("fanAlways", false);
   targetWeight = prefs.getUInt("targetWeight", 0);
@@ -471,6 +533,8 @@ void sendStatus(bool forceSend = false) {
   doc["STAT"] = String(currentState);
   doc["HAS_FIL"] = filamentDetected;
   doc["USE_FIL"] = useFilamentSensor;
+  doc["FIL_T"] = filamentLossMs;
+  doc["RES"] = resumeAfterPowerLoss;
   doc["PROG"] = progVal;
   doc["REM"] = remVal;
   doc["TEMP"] = chipTemp;
@@ -487,7 +551,7 @@ void sendStatus(bool forceSend = false) {
   doc["POW"] = motorStrength;
   doc["TRQ"] = highSpeedMode ? 0 : torqueLimit;
   doc["WGT"] = targetWeight;
-  doc["DUR"] = calibrationAt80Speed / 1000;
+  doc["DUR"] = calibrationAt85Speed / 1000;
   doc["HS"] = highSpeedMode;
   doc["FAN_SPD"] = fanSpeed;
   doc["FAN_ON"] = (fanAlwaysOn || isMotorRunning || millis() < fanStopAfter);
@@ -882,6 +946,20 @@ void handleCommand(const std::string& cmd) {
       prefs.end();
       changed = true;
     }
+    if (set.containsKey("RES")) {
+      resumeAfterPowerLoss = (int)set["RES"] != 0;
+      prefs.begin("respooler", false);
+      prefs.putBool("resume", resumeAfterPowerLoss);
+      prefs.end();
+      changed = true;
+    }
+    if (set.containsKey("FIL_T")) {
+      filamentLossMs = constrain((int)set["FIL_T"], 100, 400);
+      prefs.begin("respooler", false);
+      prefs.putUInt("filLossMs", filamentLossMs);
+      prefs.end();
+      changed = true;
+    }
     if (set.containsKey("POW")) {
       motorStrength = constrain((int)set["POW"], 80, 120);
       setMotorCurrent(motorStrength);
@@ -920,9 +998,9 @@ void handleCommand(const std::string& cmd) {
     if (set.containsKey("DUR")) {
       unsigned long dur = (unsigned long)set["DUR"];
       if (dur >= 10 && dur <= 20000) {
-        calibrationAt80Speed = dur * 1000UL;
+        calibrationAt85Speed = dur * 1000UL;
         prefs.begin("respooler", false);
-        prefs.putULong("cal80_093", calibrationAt80Speed);
+        prefs.putULong("cal85", calibrationAt85Speed);
         prefs.end();
         changed = true;
       }
@@ -1277,6 +1355,7 @@ void setup() {
   setLedcDuty(FAN_CHANNEL, 0);
   setConnLed(150);
   currentState = 'I';
+  restoreResumeRecord();
 }
 
 // ------------------- Main loop -----------------------------------
@@ -1326,7 +1405,7 @@ void loop() {
     if (filamentLostSince == 0) {
       filamentLostSince = now;
     }
-    if (filamentDetected && (now - filamentLostSince >= FILAMENT_LOSS_CONFIRM_MS)) {
+    if (filamentDetected && (now - filamentLostSince >= filamentLossConfirmMs())) {
       filamentDetected = false;
     }
   }
@@ -1532,7 +1611,7 @@ void loop() {
   }
 
 
-  if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > FILAMENT_LOSS_CONFIRM_MS) {
+  if (isMotorRunning && useFilamentSensor && !filamentDetected && filamentLostSince > 0 && now - filamentLostSince > filamentLossConfirmMs()) {
     isMotorRunning = false;
     digitalWrite(STEP_PIN, LOW);
     stepperStop();
@@ -1577,9 +1656,7 @@ void loop() {
     if (isMotorRunning) {
       shouldStartMotorNow = false;
     } else if (!useFilamentSensor || filamentDetected) {
-      int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)targetStepIntervalMicros));
-      currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-      totalEstimatedTime = calibrationAt80Speed * (80.0 / currSpeedPercent);
+      totalEstimatedTime = estimatedTotalMs(targetStepIntervalMicros);
       if (pausedElapsed > 0) {
         spoolingStartTime = millis() - pausedElapsed;
         pausedElapsed = 0;
@@ -1703,9 +1780,7 @@ void loop() {
       lastIntervalMicros = stepIntervalMicros;
     }
     if (stepIntervalMicros == targetStepIntervalMicros) {
-      int currSpeedPercent = round((float)speedPercent * ((float)baseTargetStepIntervalMicros / (float)stepIntervalMicros));
-      currSpeedPercent = constrain(currSpeedPercent, 50, 140);
-      unsigned long newTotal = calibrationAt80Speed * (80.0 / currSpeedPercent);
+      unsigned long newTotal = estimatedTotalMs(stepIntervalMicros);
       if (totalEstimatedTime > 0 && newTotal != totalEstimatedTime) {
         unsigned long elapsed = millis() - spoolingStartTime;
         double progressRatio = (double)elapsed / totalEstimatedTime;
@@ -1747,6 +1822,17 @@ void loop() {
   // ----------- Restart BLE advertising if disconnected --------------
   if (!deviceConnected && !NimBLEDevice::getAdvertising()->isAdvertising()) {
     NimBLEDevice::startAdvertising();
+  }
+
+  // ----------- Resume after power loss -----------
+  static unsigned long lastResumeSave = 0;
+  if (resumeAfterPowerLoss && isMotorRunning && spoolingStartTime > 0) {
+    if (!resumeSaved || now - lastResumeSave >= RESUME_SAVE_INTERVAL_MS) {
+      lastResumeSave = now;
+      saveResumeRecord();
+    }
+  } else if (resumeSaved) {
+    clearResumeRecord();
   }
 
   // ------------------ Guide servo movement -----------------
