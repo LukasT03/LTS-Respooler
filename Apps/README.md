@@ -5,4 +5,4 @@ The LTS Control app can be downloaded from the [App Store](https://apps.apple.co
 ## 📱 The apps have separate repos that are linked below
 - 🍏 iOS: https://github.com/LukasT03/LTS-Control-iOS
 - 🤖 Android: https://github.com/LukasT03/LTS-Control-Android
-- 💻 LTS Utility (macOS): https://github.com/LukasT03/LTS-Utility
+- 💻 macOS: https://github.com/LukasT03/LTS-Utility
