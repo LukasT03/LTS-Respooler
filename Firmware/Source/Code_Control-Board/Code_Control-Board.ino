@@ -18,6 +18,11 @@
 #include "esp_private/periph_ctrl.h"
 #include "driver/gpio.h"
 #include <freertos/semphr.h>
+#include <ESPmDNS.h>
+#include <NetworkClientSecure.h>
+#include <esp_http_server.h>
+#include <mbedtls/base64.h>
+#include <mbedtls/sha256.h>
 
 // ------------------------ Board Info ----------------------------
 #define FIRMWARE_VERSION "1.3.3"
@@ -95,6 +100,8 @@ int targetWeight = 0;                         // 0-3
 int torqueLimit = 0;                          // 0-3
 int jingleStyle = 0;                          // 0-3
 unsigned long calibrationAt85Speed = DEFAULT_CALIBRATION_MS;  // ms
+bool remoteAccess = false;                                    // true, false: connect to LTS Cloud
+String boardName = "";                                        // string, up to 64 bytes
 
 String wifiSSID = "";      // string
 String wifiPassword = "";  // string
@@ -110,6 +117,10 @@ bool servoHomeIsR = true;   // true, false
 
 // ----------------- Board variant identifier -----------------
 uint8_t boardVariant = 0;
+
+// Where a command came from. Over the cloud, Wi-Fi, remote access and firmware updates
+// can't be changed, a mistake there could only be fixed at the board.
+enum CommandSource : uint8_t { SRC_BLE, SRC_LOCAL, SRC_CLOUD };
 
 // --------------- High-Speed mode state -----------------
 bool highSpeedMode = false;
@@ -241,7 +252,7 @@ void pollSerialCommands() {
           serialRxLine = "";
         } else {
           std::string cmd(serialRxLine.c_str());
-          handleCommand(cmd);
+          handleCommand(cmd, SRC_LOCAL);
           serialRxLine = "";
         }
       } else {
@@ -267,14 +278,9 @@ void wifiScanTask(void* parameter) {
       }
     }
   }
-  if (deviceConnected && pCharacteristic) {
-    String jsonOut;
-    serializeJson(ssidDoc, jsonOut);
-    if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-    pCharacteristic->setValue(jsonOut.c_str());
-    pCharacteristic->notify();
-    if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-  }
+  String jsonOut;
+  serializeJson(ssidDoc, jsonOut);
+  notifyApps(jsonOut);
   WiFi.scanDelete();
   prefs.begin("respooler", true);
   String ssid = prefs.getString("ssid", "");
@@ -432,6 +438,8 @@ void loadSettings() {
   fanSpeed = prefs.getUInt("fanSpeed", 60);
   fanAlwaysOn = prefs.getBool("fanAlways", false);
   targetWeight = prefs.getUInt("targetWeight", 0);
+  remoteAccess = prefs.getBool("remote", false);
+  boardName = prefs.getString("name", "");
 
   servoAngleR = (int)prefs.getUInt("servoR", 5);
   servoAngleL = (int)prefs.getUInt("servoL", 175);
@@ -472,7 +480,7 @@ int readVbusMillivolts() {
 
 // ------------------- BLE status/error/settings -------------------
 void sendStatus(bool forceSend = false) {
-  if (!deviceConnected || !pCharacteristic) return;
+  if (!(deviceConnected && pCharacteristic) && !networkWantsStatus(forceSend)) return;
 
   float progVal = progress;
   int remVal = 0;
@@ -543,6 +551,12 @@ void sendStatus(bool forceSend = false) {
   doc["WIFI_SSID"] = wifiSSID.length() > 0 ? wifiSSID.c_str() : nullptr;
   doc["WIFI_OK"] = WiFi.status() == WL_CONNECTED;
   doc["FW"] = FIRMWARE_VERSION;
+  doc["ID"] = boardId();
+  doc["NAME"] = boardName.c_str();
+  doc["REMOTE"] = remoteAccess;
+  doc["CLOUD"] = networkCloudConnected();
+  if (WiFi.status() == WL_CONNECTED) doc["IP"] = WiFi.localIP().toString();
+  else doc["IP"] = nullptr;
   doc["OTA_OK"] = nullptr;
   doc["SPD"] = speedPercent;
   doc["JIN"] = jingleStyle;
@@ -572,10 +586,22 @@ void sendStatus(bool forceSend = false) {
 
   String jsonOut;
   serializeJson(doc, jsonOut);
+  notifyBle(jsonOut);
+  networkSendStatus(jsonOut, forceSend);
+}
+
+void notifyBle(const String& json) {
+  if (!deviceConnected || !pCharacteristic) return;
   if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-  pCharacteristic->setValue(jsonOut.c_str());
+  pCharacteristic->setValue(json.c_str());
   pCharacteristic->notify();
   if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
+}
+
+// Replies and events for the app, over BLE and the local network
+void notifyApps(const String& json) {
+  notifyBle(json);
+  localSend(json);
 }
 
 // ------------------- Stepper jingle/tones --------------------------
@@ -712,35 +738,25 @@ void sendOTAUpdate() {
         }
         if (Update.end() && Update.isFinished()) {
           otaSuccess = true;
-          if (deviceConnected && pCharacteristic) {
-            StaticJsonDocument<64> doc;
-            doc["OTA_OK"] = true;
-            delay(100);
-            sendStatus(true);
-            String jsonOut;
-            serializeJson(doc, jsonOut);
-            if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-            pCharacteristic->setValue(jsonOut.c_str());
-            pCharacteristic->notify();
-            if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-            NimBLEDevice::deinit(true);
-            delay(1000);
-          }
+          StaticJsonDocument<64> doc;
+          doc["OTA_OK"] = true;
+          delay(100);
+          sendStatus(true);
+          String jsonOut;
+          serializeJson(doc, jsonOut);
+          notifyApps(jsonOut);
+          NimBLEDevice::deinit(true);
+          delay(1000);
           otaInProgress = false;
           otaLedPulseTaskHandle = nullptr;
           ESP.restart();
         }
       } else {
-        if (deviceConnected && pCharacteristic) {
-          StaticJsonDocument<64> doc;
-          doc["OTA_OK"] = false;
-          String jsonOut;
-          serializeJson(doc, jsonOut);
-          if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-          pCharacteristic->setValue(jsonOut.c_str());
-          pCharacteristic->notify();
-          if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-        }
+        StaticJsonDocument<64> doc;
+        doc["OTA_OK"] = false;
+        String jsonOut;
+        serializeJson(doc, jsonOut);
+        notifyApps(jsonOut);
         otaInProgress = false;
         otaLedPulseTaskHandle = nullptr;
         currentState = 'I';
@@ -748,16 +764,11 @@ void sendOTAUpdate() {
         vTaskDelete(NULL);
       }
     } else {
-      if (deviceConnected && pCharacteristic) {
-        StaticJsonDocument<64> doc;
-        doc["OTA_OK"] = false;
-        String jsonOut;
-        serializeJson(doc, jsonOut);
-        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-        pCharacteristic->setValue(jsonOut.c_str());
-        pCharacteristic->notify();
-        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-      }
+      StaticJsonDocument<64> doc;
+      doc["OTA_OK"] = false;
+      String jsonOut;
+      serializeJson(doc, jsonOut);
+      notifyApps(jsonOut);
       otaInProgress = false;
       otaLedPulseTaskHandle = nullptr;
       currentState = 'I';
@@ -766,16 +777,11 @@ void sendOTAUpdate() {
     }
     http.end();
     if (!otaSuccess) {
-      if (deviceConnected && pCharacteristic) {
-        StaticJsonDocument<64> doc;
-        doc["OTA_OK"] = false;
-        String jsonOut;
-        serializeJson(doc, jsonOut);
-        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-        pCharacteristic->setValue(jsonOut.c_str());
-        pCharacteristic->notify();
-        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-      }
+      StaticJsonDocument<64> doc;
+      doc["OTA_OK"] = false;
+      String jsonOut;
+      serializeJson(doc, jsonOut);
+      notifyApps(jsonOut);
     }
     otaInProgress = false;
     otaLedPulseTaskHandle = nullptr;
@@ -786,13 +792,14 @@ void sendOTAUpdate() {
               "OTAUpdateTask", 8192, NULL, 1, NULL);
 }
 
-void handleCommand(const std::string& cmd) {
+void handleCommand(const std::string& cmd, CommandSource src) {
   StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, cmd.c_str());
   if (error) return;
 
   if (doc.containsKey("CMD")) {
     String command = doc["CMD"].as<String>();
+    if (src == SRC_CLOUD && (command == "WIFI_SCAN" || command == "WIFI_CONNECT" || command == "OTA")) return;
     if (command == "START") {
       if (!isMotorRunning) {
         shouldStartMotorNow = true;
@@ -867,6 +874,8 @@ void handleCommand(const std::string& cmd) {
         currentState = 'P';
         sendStatus(true);
       }
+    } else if (command == "KEY") {
+      if (src != SRC_CLOUD) sendBoardKey();
     } else if (command == "WIFI_SCAN") {
       if (wifiScanTaskHandle == nullptr) {
         xTaskCreate(wifiScanTask, "WiFiScan", 4096, NULL, 1, &wifiScanTaskHandle);
@@ -886,6 +895,11 @@ void handleCommand(const std::string& cmd) {
   }
   if (doc.containsKey("SET")) {
     JsonObject set = doc["SET"].as<JsonObject>();
+    if (src == SRC_CLOUD) {
+      set.remove("WIFI_SSID");
+      set.remove("WIFI_PASS");
+      set.remove("REMOTE");
+    }
     bool changed = false;
     bool servoEndpointsChanged = false;
     if (set.containsKey("VAR")) {
@@ -1140,6 +1154,24 @@ void handleCommand(const std::string& cmd) {
       servoHomingToHome = true;
       lastServoHomeStepTime = millis();
     }
+    if (set.containsKey("NAME")) {
+      String name = set["NAME"].as<String>();
+      name.trim();
+      if (name.length() <= 64 && name != boardName) {
+        boardName = name;
+        prefs.begin("respooler", false);
+        prefs.putString("name", boardName);
+        prefs.end();
+        changed = true;
+      }
+    }
+    if (set.containsKey("REMOTE")) {
+      remoteAccess = set["REMOTE"].as<bool>();
+      prefs.begin("respooler", false);
+      prefs.putBool("remote", remoteAccess);
+      prefs.end();
+      changed = true;
+    }
     if (set.containsKey("WIFI_SSID")) {
       wifiSSID = set["WIFI_SSID"].as<String>();
       changed = true;
@@ -1183,7 +1215,7 @@ class MyServerCallbacks : public NimBLEServerCallbacks {
 class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* pChar, NimBLEConnInfo&) override {
     std::string rx = pChar->getValue();
-    if (!rx.empty()) handleCommand(rx);
+    if (!rx.empty()) handleCommand(rx, SRC_BLE);
   }
 };
 
@@ -1318,6 +1350,7 @@ void setup() {
   }
   bleNotifyMutex = xSemaphoreCreateMutex();
   loadSettings();
+  networkSetup();
   setMotorCurrent(motorStrength);
   pwmValue = calculatePWM(ledBrightness);
 
@@ -1362,37 +1395,28 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   pollSerialCommands();
+  networkPoll();
 
   // ------------------ Wi-Fi connect async check -----------------
   if (wifiConnectInProgress) {
     if (WiFi.status() == WL_CONNECTED) {
       wifiConnectInProgress = false;
-      if (deviceConnected && pCharacteristic) {
-        StaticJsonDocument<64> doc;
-        doc["WIFI_CONN_RESULT"] = true;
-        String jsonOut;
-        serializeJson(doc, jsonOut);
-        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-        pCharacteristic->setValue(jsonOut.c_str());
-        pCharacteristic->notify();
-        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-      }
+      StaticJsonDocument<64> doc;
+      doc["WIFI_CONN_RESULT"] = true;
+      String jsonOut;
+      serializeJson(doc, jsonOut);
+      notifyApps(jsonOut);
       prefs.begin("respooler", false);
       prefs.putString("ssid", wifiSSID);
       prefs.putString("pwd", wifiPassword);
       prefs.end();
     } else if (millis() - wifiConnectStartTime > 10000) {
       wifiConnectInProgress = false;
-      if (deviceConnected && pCharacteristic) {
-        StaticJsonDocument<64> doc;
-        doc["WIFI_CONN_RESULT"] = false;
-        String jsonOut;
-        serializeJson(doc, jsonOut);
-        if (bleNotifyMutex) xSemaphoreTake(bleNotifyMutex, portMAX_DELAY);
-        pCharacteristic->setValue(jsonOut.c_str());
-        pCharacteristic->notify();
-        if (bleNotifyMutex) xSemaphoreGive(bleNotifyMutex);
-      }
+      StaticJsonDocument<64> doc;
+      doc["WIFI_CONN_RESULT"] = false;
+      String jsonOut;
+      serializeJson(doc, jsonOut);
+      notifyApps(jsonOut);
     }
   }
 
