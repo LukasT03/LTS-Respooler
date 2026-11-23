@@ -1,7 +1,7 @@
 // ------------------ Local network and LTS Cloud -------------------
-// Same file in both board sketches. Next to BLE, the app reaches the board over a
-// WebSocket on the local network (ws://<board>/ws, found via mDNS as _lts-respooler._tcp)
-// and, with remote access on, over LTS Cloud. All three carry the same JSON.
+// Next to BLE, the app reaches the board over a WebSocket on the local network
+// (ws://<board>/ws, found via mDNS as _lts-respooler._tcp) and, with remote access on,
+// over LTS Cloud. All three carry the same JSON.
 
 #define CLOUD_HOST "cloud.lts-design.com"
 #define CLOUD_PATH "/v1/board"
